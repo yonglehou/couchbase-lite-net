@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProductVersion>12.0.0</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{18AE9E93-AF27-47A0-921C-1846941643B6}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Couchbase.Lite</RootNamespace>
+    <AssemblyName>Couchbase.Lite</AssemblyName>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug</OutputPath>
+    <DefineConstants>DEBUG;</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <ConsolePause>false</ConsolePause>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <DebugType>full</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release</OutputPath>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <ConsolePause>false</ConsolePause>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
+  <ItemGroup>
+    <Folder Include="Http\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\FormBodyPart.cs">
+      <Link>Http\FormBodyPart.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Header.cs">
+      <Link>Http\Header.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\HttpMultipart.cs">
+      <Link>Http\HttpMultipart.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\HttpMultipartMode.cs">
+      <Link>Http\HttpMultipartMode.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\MIME.cs">
+      <Link>Http\MIME.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\MinimalField.cs">
+      <Link>Http\MinimalField.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\MultipartEntity.cs">
+      <Link>Http\MultipartEntity.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\AbstractContentBody.cs">
+      <Link>Http\Content\AbstractContentBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\ByteArrayBody.cs">
+      <Link>Http\Content\ByteArrayBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\ContentBody.cs">
+      <Link>Http\Content\ContentBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\ContentDescriptor.cs">
+      <Link>Http\Content\ContentDescriptor.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\FileBody.cs">
+      <Link>Http\Content\FileBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\InputStreamBody.cs">
+      <Link>Http\Content\InputStreamBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Apache\Http\Entity\Mime\Content\StringBody.cs">
+      <Link>Http\Content\StringBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLAttachment.cs">
+      <Link>CBLAttachment.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLBlobKey.cs">
+      <Link>CBLBlobKey.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLBlobStore.cs">
+      <Link>CBLBlobStore.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLBlobStoreWriter.cs">
+      <Link>CBLBlobStoreWriter.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLChangesOptions.cs">
+      <Link>CBLChangesOptions.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLDatabase.cs">
+      <Link>CBLDatabase.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLDatabaseChangedFunction.cs">
+      <Link>CBLDatabaseChangedFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLDatabaseFunction.cs">
+      <Link>CBLDatabaseFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLDocument.cs">
+      <Link>CBLDocument.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLFilterBlock.cs">
+      <Link>CBLFilterBlock.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLFilterCompiler.cs">
+      <Link>CBLFilterCompiler.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLLiveQuery.cs">
+      <Link>CBLLiveQuery.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLLiveQueryChangedFunction.cs">
+      <Link>CBLLiveQueryChangedFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLManager.cs">
+      <Link>CBLManager.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLManagerOptions.cs">
+      <Link>CBLManagerOptions.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLMapEmitFunction.cs">
+      <Link>CBLMapEmitFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLMapFunction.cs">
+      <Link>CBLMapFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLMisc.cs">
+      <Link>CBLMisc.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLNewRevision.cs">
+      <Link>CBLNewRevision.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLQuery.cs">
+      <Link>CBLQuery.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLQueryCompleteFunction.cs">
+      <Link>CBLQueryCompleteFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLQueryEnumerator.cs">
+      <Link>CBLQueryEnumerator.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLQueryOptions.cs">
+      <Link>CBLQueryOptions.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLQueryRow.cs">
+      <Link>CBLQueryRow.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLReduceFunction.cs">
+      <Link>CBLReduceFunction.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLRevision.cs">
+      <Link>CBLRevision.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLRevisionBase.cs">
+      <Link>CBLRevisionBase.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLRevisionList.cs">
+      <Link>CBLRevisionList.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLServer.cs">
+      <Link>CBLServer.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLStatus.cs">
+      <Link>CBLStatus.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLValidationBlock.cs">
+      <Link>CBLValidationBlock.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLValidationContext.cs">
+      <Link>CBLValidationContext.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLView.cs">
+      <Link>CBLView.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLViewCompiler.cs">
+      <Link>CBLViewCompiler.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLiteException.cs">
+      <Link>CBLiteException.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\CBLiteVersion.cs">
+      <Link>CBLiteVersion.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\TDCollateJSON.cs">
+      <Link>TDCollateJSON.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Auth\CBLAuthorizer.cs">
+      <Link>Auth\CBLAuthorizer.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Auth\CBLFacebookAuthorizer.cs">
+      <Link>Auth\CBLFacebookAuthorizer.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Auth\CBLPersonaAuthorizer.cs">
+      <Link>Auth\CBLPersonaAuthorizer.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Internal\CBLAttachmentInternal.cs">
+      <Link>Internal\CBLAttachmentInternal.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Internal\CBLBody.cs">
+      <Link>Internal\CBLBody.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Internal\CBLDatabaseInternal.cs">
+      <Link>Internal\CBLDatabaseInternal.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Internal\CBLRevisionInternal.cs">
+      <Link>Internal\CBLRevisionInternal.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\CBLPuller.cs">
+      <Link>Replicator\CBLPuller.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\CBLPusher.cs">
+      <Link>Replicator\CBLPusher.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\CBLReplicator.cs">
+      <Link>Replicator\CBLReplicator.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\Changetracker\CBLChangeTracker.cs">
+      <Link>Replicator\Changetracker\CBLChangeTracker.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\Changetracker\CBLChangeTrackerBackoff.cs">
+      <Link>Replicator\Changetracker\CBLChangeTrackerBackoff.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Replicator\Changetracker\CBLChangeTrackerClient.cs">
+      <Link>Replicator\Changetracker\CBLChangeTrackerClient.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Router\CBLRouter.cs">
+      <Link>Router\CBLRouter.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Router\CBLRouterCallbackBlock.cs">
+      <Link>Router\CBLRouterCallbackBlock.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Router\CBLURLConnection.cs">
+      <Link>Router\CBLURLConnection.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Router\CBLURLHandler.cs">
+      <Link>Router\CBLURLHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Router\CBLURLStreamHandlerFactory.cs">
+      <Link>Router\CBLURLStreamHandlerFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\Base64.cs">
+      <Link>Support\Base64.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLBatchProcessor.cs">
+      <Link>Support\CBLBatchProcessor.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLBatcher.cs">
+      <Link>Support\CBLBatcher.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLHttpClientFactory.cs">
+      <Link>Support\CBLHttpClientFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLMultipartDocumentReader.cs">
+      <Link>Support\CBLMultipartDocumentReader.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLMultipartReader.cs">
+      <Link>Support\CBLMultipartReader.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLMultipartReaderDelegate.cs">
+      <Link>Support\CBLMultipartReaderDelegate.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLRemoteMultipartDownloaderRequest.cs">
+      <Link>Support\CBLRemoteMultipartDownloaderRequest.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLRemoteMultipartRequest.cs">
+      <Link>Support\CBLRemoteMultipartRequest.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLRemoteRequest.cs">
+      <Link>Support\CBLRemoteRequest.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLRemoteRequestCompletionBlock.cs">
+      <Link>Support\CBLRemoteRequestCompletionBlock.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\CBLSequenceMap.cs">
+      <Link>Support\CBLSequenceMap.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\FileDirUtils.cs">
+      <Link>Support\FileDirUtils.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\HttpClientFactory.cs">
+      <Link>Support\HttpClientFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\..\src\sharpen.net\java\Couchbase\Support\Range.cs">
+      <Link>Support\Range.cs</Link>
+    </Compile>
+  </ItemGroup>
+</Project>

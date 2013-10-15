@@ -4,3 +4,4 @@
 src/sharpen/
 .metadata
 src/sharpen.net/
+*.userprefs
