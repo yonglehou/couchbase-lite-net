@@ -2,3 +2,5 @@
 *.iml
 .DS_Store
 src/sharpen/
+.metadata
+src/sharpen.net/

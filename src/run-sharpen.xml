@@ -2,13 +2,31 @@
 <project name="CouchbaseLite.Net" default="sharpen-couchbase-lite">
 	<property file="sharpen.properties" />
 
-	<macrodef name="reset-dir">
-		<attribute name="dir" />
-		<sequential>
-			<delete dir="@{dir}" />
-			<mkdir dir="@{dir}" />
-		</sequential>
-	</macrodef>
+
+  <!-- Main target -->
+  <target name="sharpen-couchbase-lite-prep" depends="clean">
+
+    <property name="clean.dir" location="sharpen" />
+
+    <!-- Copy java files to the resource folder -->
+    <copy todir="${clean.dir}/java">
+	
+	  <!-- CHECK THIS SETTING 
+	  	   Make sure that the fileset dir below points to the root folder 
+	       containing the Java source code files you want to convert to C#
+	  -->
+      <fileset dir="main/java">
+        <include name="**/*.java" />
+      </fileset>
+      <fileset dir="main/gen">
+        <include name="**/*.java" />
+      </fileset>
+      </copy>
+
+    <!-- Apply our custom patches -->
+	<patch patchfile="patches/FixJavaEnums.patch" strip="1" dir="sharpen" />    
+
+  </target>
 
 	<macrodef name="sharpen">
 		<attribute name="workspace" />
@@ -39,27 +57,12 @@
 
 
   <!-- Main target -->
-  <target name="sharpen-couchbase-lite" depends="clean">
+  <target name="sharpen-couchbase-lite" depends="sharpen-couchbase-lite-prep">
 
-    <property name="target.dir" location="sharpen" />
+    <property name="target.dir" location="${dir.workspace}" />
 
-    <!-- Copy java files to the resource folder -->
-    <copy todir="${target.dir}/sharpen/src">
-	
-	  <!-- CHECK THIS SETTING 
-	  	   Make sure that the fileset dir below points to the root folder 
-	       containing the Java source code files you want to convert to C#
-	  -->
-      <fileset dir="main/java">
-        <include name="**/*.java" />
-      </fileset>
-      <fileset dir="main/gen">
-        <include name="**/*.java" />
-      </fileset>
-      </copy>
-
-        <!-- Sharpen java files -->
-    <sharpen workspace="${target.dir}" resource="sharpen/src">
+    <!-- Sharpen java files -->
+    <sharpen workspace="${target.dir}" resource="sharpen/java">
       <args>
 
 	  	<!-- CHECK THIS SETTING 
@@ -85,13 +88,12 @@
         <arg value="@sharpen-all-options" />
       </args>
     </sharpen>
-
   </target>
 
   <!-- Remove resources from the previous convertion run -->
   <target name="clean" description="Delete all generated files">
-    <delete failonerror="true" includeemptydirs="true" 
-description="Removing all generated files">
+    <delete failonerror="false" dir=".metadata" description="Removing the Eclipse metadata directory" />
+    <delete failonerror="false" includeemptydirs="true" description="Removing all generated files">
       <fileset dir="sharpen">
         <include name="**/*" />
         <exclude name="**/lib/*" />
