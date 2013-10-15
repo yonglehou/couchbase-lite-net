@@ -3,5 +3,6 @@
 .DS_Store
 src/sharpen/
 .metadata
-src/sharpen.net/
 *.userprefs
+src/sharpen.net/.project
+src/sharpen.net/.settings/org.eclipse.core.resources.prefs
