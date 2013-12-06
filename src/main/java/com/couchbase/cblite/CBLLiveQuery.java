@@ -1,22 +1,29 @@
 package com.couchbase.cblite;
 
-import android.util.Log;
+import com.couchbase.cblite.internal.InterfaceAudience;
+import com.couchbase.cblite.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * A CBLQuery subclass that automatically refreshes the result rows every time the database changes.
- * All you need to do is use add a listener to observe changes to the .rows property.
+ * All you need to do is use add a listener to observe changes.
  */
-public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction {
+public class CBLLiveQuery extends CBLQuery implements CBLDatabase.ChangeListener {
 
     private boolean observing;
     private boolean willUpdate;
     private CBLQueryEnumerator rows;
-    private List<CBLLiveQueryChangedFunction> observers = new ArrayList<CBLLiveQueryChangedFunction>();
-    private Thread updaterThread;
+    private List<ChangeListener> observers = new ArrayList<ChangeListener>();
+    private Throwable lastError;
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     CBLLiveQuery(CBLQuery query) {
         super(query.getDatabase(), query.getView());
         setLimit(query.getLimit());
@@ -24,13 +31,36 @@ public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction
         setStartKey(query.getStartKey());
         setEndKey(query.getEndKey());
         setDescending(query.isDescending());
-        setPrefetch(query.isPrefetch());
+        setPrefetch(query.shouldPrefetch());
         setKeys(query.getKeys());
         setGroupLevel(query.getGroupLevel());
         setMapOnly(query.isMapOnly());
         setStartKeyDocId(query.getStartKeyDocId());
         setEndKeyDocId(query.getEndKeyDocId());
-        setStale(query.getStale());
+        setIndexUpdateMode(query.getIndexUpdateMode());
+    }
+
+    /**
+     * In CBLLiveQuery the rows accessor is a non-blocking property.
+     * Its value will be nil until the initial query finishes.
+     */
+    @InterfaceAudience.Public
+    public CBLQueryEnumerator run() throws CBLiteException {
+        if (rows == null) {
+            return null;
+        }
+        else {
+            // Have to return a copy because the enumeration has to start at item #0 every time
+            return new CBLQueryEnumerator(rows);
+        }
+    }
+
+    /**
+     * Returns the last error, if any, that occured while executing the Query, otherwise null.
+     */
+    @InterfaceAudience.Public
+    public Throwable getLastError() {
+        return lastError;
     }
 
     /**
@@ -38,6 +68,7 @@ public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction
      * usually don't need to call this yourself, since calling rows()
      * call start for you.)
      */
+    @InterfaceAudience.Public
     public void start() {
         if (!observing) {
             observing = true;
@@ -49,6 +80,7 @@ public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction
     /**
      * Stops observing database changes. Calling start() or rows() will restart it.
      */
+    @InterfaceAudience.Public
     public void stop() {
         if (observing) {
             observing = false;
@@ -57,81 +89,76 @@ public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction
 
         if (willUpdate) {
             setWillUpdate(false);
-            // TODO: how can we cancelPreviousPerformRequestsWithTarget ? as done in iOS?
+            updateQueryFuture.cancel(true);
         }
     }
-
-    /**
-     * In CBLLiveQuery the rows accessor is a non-blocking property.
-     * Its value will be nil until the initial query finishes.
-     */
-    public CBLQueryEnumerator getRows() throws CBLiteException {
-        if (rows == null) {
-            return null;
-        }
-        else {
-            // Have to return a copy because the enumeration has to start at item #0 every time
-            return new CBLQueryEnumerator(rows);
-        }
-    }
-
 
     /**
      * Blocks until the intial async query finishes. After this call either .rows or .error will be non-nil.
      */
-    public boolean waitForRows() {
+    @InterfaceAudience.Public
+    public void waitForRows() throws InterruptedException, ExecutionException {
         start();
-        waitForUpdateThread();
-
-        return rows != null;
+        try {
+            updateQueryFuture.get();
+        } catch (InterruptedException e) {
+            Log.e(CBLDatabase.TAG, "Got interrupted exception waiting for rows", e);
+            throw e;
+        } catch (ExecutionException e) {
+            Log.e(CBLDatabase.TAG, "Got execution exception waiting for rows", e);
+            throw e;
+        }
     }
 
-
-    public void addChangeListener(CBLLiveQueryChangedFunction liveQueryChangedFunction) {
-        observers.add(liveQueryChangedFunction);
+    /**
+     * Add a change listener to be notified when the live query result
+     * set changes.
+     */
+    @InterfaceAudience.Public
+    public void addChangeListener(ChangeListener changeListener) {
+        observers.add(changeListener);
     }
 
-    public void removeChangeListener(CBLLiveQueryChangedFunction liveQueryChangedFunction) {
-        observers.remove(liveQueryChangedFunction);
+    /**
+     * Remove previously added change listener
+     */
+    @InterfaceAudience.Public
+    public void removeChangeListener(ChangeListener changeListener) {
+        observers.remove(changeListener);
     }
 
     void update() {
+        if (getView() == null) {
+            throw new IllegalStateException("Cannot start LiveQuery when view is null");
+        }
         setWillUpdate(false);
-        updaterThread = runAsyncInternal(new CBLQueryCompleteFunction() {
+        updateQueryFuture = runAsyncInternal(new QueryCompleteListener() {
             @Override
-            public void onQueryChanged(CBLQueryEnumerator queryEnumerator) {
-                if (queryEnumerator != null && !queryEnumerator.equals(rows)) {
-                    setRows(queryEnumerator);
-                    for (CBLLiveQueryChangedFunction observer : observers) {
-                        observer.onLiveQueryChanged(queryEnumerator);
+            public void completed(CBLQueryEnumerator rows, Throwable error) {
+                if (error != null) {
+                    for (ChangeListener observer : observers) {
+                        observer.changed(new ChangeEvent(error));
                     }
-                }
-            }
-
-            @Override
-            public void onFailureQueryChanged(CBLiteException exception) {
-                for (CBLLiveQueryChangedFunction observer : observers) {
-                    observer.onFailureLiveQueryChanged(exception);
+                    lastError = error;
+                } else {
+                    if (rows != null && !rows.equals(rows)) {
+                        setRows(rows);
+                        for (ChangeListener observer : observers) {
+                            observer.changed(new ChangeEvent(CBLLiveQuery.this, rows));
+                        }
+                    }
+                    lastError = null;
                 }
             }
         });
     }
 
-    public void onDatabaseChanged(CBLDatabase database) {
+    @Override
+    public void changed(CBLDatabase.ChangeEvent event) {
         if (!willUpdate) {
             setWillUpdate(true);
-
-            // wait for any existing updates to finish before starting
-            // a new one.  TODO: this whole class needs review and solid testing
-            waitForUpdateThread();
-
             update();
         }
-
-    }
-
-    public void onFailureDatabaseChanged(CBLiteException exception) {
-        Log.e(CBLDatabase.TAG, "onFailureDatabaseChanged", exception);
     }
 
     private synchronized void setRows(CBLQueryEnumerator queryEnumerator) {
@@ -142,15 +169,41 @@ public class CBLLiveQuery extends CBLQuery implements CBLDatabaseChangedFunction
         willUpdate = willUpdateParam;
     }
 
-    private void waitForUpdateThread() {
-        if (updaterThread != null) {
-            try {
+    public static class ChangeEvent {
 
-                updaterThread.join();
+        private CBLLiveQuery source;
+        private Throwable error;
+        private CBLQueryEnumerator queryEnumerator;
 
-            } catch (InterruptedException e) {
-            }
+        ChangeEvent() {
         }
+
+        ChangeEvent(CBLLiveQuery source, CBLQueryEnumerator queryEnumerator) {
+            this.source = source;
+            this.queryEnumerator = queryEnumerator;
+        }
+
+        ChangeEvent(Throwable error) {
+            this.error = error;
+        }
+
+        public CBLLiveQuery getSource() {
+            return source;
+        }
+
+        public Throwable getError() {
+            return error;
+        }
+
+        public CBLQueryEnumerator getRows() {
+            return queryEnumerator;
+        }
+
     }
+
+    public static interface ChangeListener {
+        public void changed(ChangeEvent event);
+    }
+
 
 }

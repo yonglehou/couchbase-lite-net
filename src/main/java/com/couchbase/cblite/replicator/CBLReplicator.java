@@ -1,15 +1,14 @@
 package com.couchbase.cblite.replicator;
 
-import android.net.Uri;
-import android.util.Log;
-
 import com.couchbase.cblite.CBLDatabase;
 import com.couchbase.cblite.CBLMisc;
+import com.couchbase.cblite.DocumentChange;
 import com.couchbase.cblite.internal.CBLRevisionInternal;
 import com.couchbase.cblite.CBLRevisionList;
 import com.couchbase.cblite.auth.CBLAuthorizer;
 import com.couchbase.cblite.auth.CBLFacebookAuthorizer;
 import com.couchbase.cblite.auth.CBLPersonaAuthorizer;
+import com.couchbase.cblite.internal.InterfaceAudience;
 import com.couchbase.cblite.support.CBLBatchProcessor;
 import com.couchbase.cblite.support.CBLBatcher;
 import com.couchbase.cblite.support.CBLHttpClientFactory;
@@ -18,12 +17,16 @@ import com.couchbase.cblite.support.CBLRemoteMultipartRequest;
 import com.couchbase.cblite.support.CBLRemoteRequest;
 import com.couchbase.cblite.support.CBLRemoteRequestCompletionBlock;
 import com.couchbase.cblite.support.HttpClientFactory;
+import com.couchbase.cblite.util.URIUtils;
+import com.couchbase.cblite.util.Log;
 
 import org.apache.http.client.HttpResponseException;
 import org.apache.http.entity.mime.MultipartEntity;
 
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +36,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-public abstract class CBLReplicator extends Observable {
+public abstract class CBLReplicator {
 
     private static int lastSessionID = 0;
 
+    protected boolean continuous;
+    protected String filterName;
     protected ScheduledExecutorService workExecutor;
     protected CBLDatabase db;
     protected URL remote;
-    protected boolean continuous;
     protected String lastSequence;
     protected boolean lastSequenceChanged;
     protected Map<String, Object> remoteCheckpoint;
@@ -52,43 +56,65 @@ public abstract class CBLReplicator extends Observable {
     protected String sessionID;
     protected CBLBatcher<CBLRevisionInternal> batcher;
     protected int asyncTaskCount;
-    private int changesProcessed;
-    private int changesTotal;
-    protected final HttpClientFactory clientFacotry;
-    protected String filterName;
+    private int completedChangesCount;
+    private int changesCount;
+    protected final HttpClientFactory clientFactory;
+    private List<ChangeListener> changeListeners;
+
     protected Map<String, Object> filterParams;
     protected ExecutorService remoteRequestExecutor;
     protected CBLAuthorizer authorizer;
 
     protected static final int PROCESSOR_DELAY = 500;
     protected static final int INBOX_CAPACITY = 100;
+    public static final String REPLICATOR_DATABASE_NAME = "_replicator";
 
+    /**
+     * Options for what metadata to include in document bodies
+     */
+    public enum ReplicationMode {
+        REPLICATION_STOPPED,  /**< The replication is finished or hit a fatal error. */
+        REPLICATION_OFFLINE,  /**< The remote host is currently unreachable. */
+        REPLICATION_IDLE,     /**< Continuous replication is caught up and waiting for more changes.*/
+        REPLICATION_ACTIVE    /**< The replication is actively transferring data. */
+    }
+
+
+    /**
+     * Private Constructor
+     */
+    @InterfaceAudience.Private
     public CBLReplicator(CBLDatabase db, URL remote, boolean continuous, ScheduledExecutorService workExecutor) {
         this(db, remote, continuous, null, workExecutor);
     }
 
-    public CBLReplicator(CBLDatabase db, URL remote, boolean continuous, HttpClientFactory clientFacotry, ScheduledExecutorService workExecutor) {
+    /**
+     * Private Constructor
+     */
+    @InterfaceAudience.Private
+    public CBLReplicator(CBLDatabase db, URL remote, boolean continuous, HttpClientFactory clientFactory, ScheduledExecutorService workExecutor) {
 
         this.db = db;
         this.continuous = continuous;
         this.workExecutor = workExecutor;
         this.remote = remote;
         this.remoteRequestExecutor = Executors.newCachedThreadPool();
+        this.changeListeners = new ArrayList<ChangeListener>();
 
         if (remote.getQuery() != null && !remote.getQuery().isEmpty()) {
 
-            Uri uri = Uri.parse(remote.toExternalForm());
+            URI uri = URI.create(remote.toExternalForm());
 
-            String personaAssertion = uri.getQueryParameter(CBLPersonaAuthorizer.QUERY_PARAMETER);
+            String personaAssertion = URIUtils.getQueryParameter(uri, CBLPersonaAuthorizer.QUERY_PARAMETER);
             if (personaAssertion != null && !personaAssertion.isEmpty()) {
                 String email = CBLPersonaAuthorizer.registerAssertion(personaAssertion);
                 CBLPersonaAuthorizer authorizer = new CBLPersonaAuthorizer(email);
                 setAuthorizer(authorizer);
             }
 
-            String facebookAccessToken = uri.getQueryParameter(CBLFacebookAuthorizer.QUERY_PARAMETER);
+            String facebookAccessToken = URIUtils.getQueryParameter(uri, CBLFacebookAuthorizer.QUERY_PARAMETER);
             if (facebookAccessToken != null && !facebookAccessToken.isEmpty()) {
-                String email = uri.getQueryParameter(CBLFacebookAuthorizer.QUERY_PARAMETER_EMAIL);
+                String email = URIUtils.getQueryParameter(uri, CBLFacebookAuthorizer.QUERY_PARAMETER_EMAIL);
                 CBLFacebookAuthorizer authorizer = new CBLFacebookAuthorizer(email);
                 URL remoteWithQueryRemoved = null;
                 try {
@@ -120,35 +146,249 @@ public abstract class CBLReplicator extends Observable {
             }
         });
 
-        this.clientFacotry = clientFacotry != null ? clientFacotry : CBLHttpClientFactory.INSTANCE;
-
+        this.clientFactory = clientFactory != null ? clientFactory : CBLHttpClientFactory.INSTANCE;
 
     }
 
-    public String getFilterName() {
-        return filterName;
+    /**
+     * Get the local database which is the source or target of this replication
+     */
+    @InterfaceAudience.Public
+    public CBLDatabase getLocalDatabase() {
+        return db;
     }
 
-    public void setFilterName(String filterName) {
-        this.filterName = filterName;
+    /**
+     * Get the remote URL which is the source or target of this replication
+     */
+    @InterfaceAudience.Public
+    public URL getRemoteUrl() {
+        return remote;
     }
 
-    public Map<String, Object> getFilterParams() {
-        return filterParams;
-    }
+    /**
+     * Is this a pull replication?  (Eg, it pulls data from Sync Gateway -> Device running CBL?)
+     */
+    @InterfaceAudience.Public
+    public abstract boolean isPull();
 
-    public void setFilterParams(Map<String, Object> filterParams) {
-        this.filterParams = filterParams;
-    }
 
+    /**
+     * Should the target database be created if it doesn't already exist? (Defaults to NO).
+     */
+    @InterfaceAudience.Public
+    public abstract boolean shouldCreateTarget();
+
+    /**
+     * Set whether the target database be created if it doesn't already exist?
+     */
+    @InterfaceAudience.Public
+    public abstract void setCreateTarget(boolean createTarget);
+
+    /**
+     * Should the replication operate continuously, copying changes as soon as the
+     * source database is modified? (Defaults to NO).
+     */
+    @InterfaceAudience.Public
     public boolean isContinuous() {
         return continuous;
     }
 
+    /**
+     * Set whether the replication should operate continuously.
+     */
+    @InterfaceAudience.Public
     public void setContinuous(boolean continuous) {
         if (!isRunning()) {
             this.continuous = continuous;
         }
+    }
+
+    /**
+     * Name of an optional filter function to run on the source server. Only documents for
+     * which the function returns true are replicated.
+     *
+     * For a pull replication, the name looks like "designdocname/filtername".
+     * For a push replication, use the name under which you registered the filter with the CBLDatabase.
+     */
+    @InterfaceAudience.Public
+    public String getFilter() {
+        return filterName;
+    }
+
+    /**
+     * Set the filter to be used by this replication
+     */
+    @InterfaceAudience.Public
+    public void setFilter(String filterName) {
+        this.filterName = filterName;
+    }
+
+    /**
+     * Parameters to pass to the filter function.  Should map strings to strings.
+     */
+    @InterfaceAudience.Public
+    public Map<String, Object> getFilterParams() {
+        return filterParams;
+    }
+
+    /**
+     * Set parameters to pass to the filter function.
+     */
+    @InterfaceAudience.Public
+    public void setFilterParams(Map<String, Object> filterParams) {
+        this.filterParams = filterParams;
+    }
+
+    /**
+     * List of Sync Gateway channel names to filter by; a nil value means no filtering, i.e. all
+     * available channels will be synced.  Only valid for pull replications whose source database
+     * is on a Couchbase Sync Gateway server.  (This is a convenience that just reads or
+     * changes the values of .filter and .query_params.)
+     */
+    @InterfaceAudience.Public
+    public List<String> getChannels() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Set the list of Sync Gateway channel names
+     */
+    @InterfaceAudience.Public
+    public void setChannels(List<String> channels) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Extra HTTP headers to send in all requests to the remote server.
+     * Should map strings (header names) to strings.
+     */
+    @InterfaceAudience.Public
+    public Map<String, String> getHeaders() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Set Extra HTTP headers to be sent in all requests to the remote server.
+     */
+    @InterfaceAudience.Public
+    public void setHeaders(Map<String, String> headers) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Gets the documents to specify as part of the replication.
+     */
+    @InterfaceAudience.Public
+    public List<String> getDocsIds() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Sets the documents to specify as part of the replication.
+     */
+    @InterfaceAudience.Public
+    public void setDocIds(List<String> docIds) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * The replication's current state, one of {stopped, offline, idle, active}.
+     */
+    @InterfaceAudience.Public
+    public ReplicationMode getMode() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * The number of completed changes processed, if the task is active, else 0 (observable).
+     */
+    @InterfaceAudience.Public
+    public int getCompletedChangesCount() {
+        return completedChangesCount;
+    }
+
+    /**
+     * The total number of changes to be processed, if the task is active, else 0 (observable).
+     */
+    @InterfaceAudience.Public
+    public int getChangesCount() {
+        return changesCount;
+    }
+
+    /**
+     * True while the replication is running, False if it's stopped.
+     * Note that a continuous replication never actually stops; it only goes idle waiting for new
+     * data to appear.
+     */
+    @InterfaceAudience.Public
+    public boolean isRunning() {
+        return running;
+    }
+
+    /**
+     * The error status of the replication, or null if there have not been any errors since
+     * it started.
+     */
+    @InterfaceAudience.Public
+    public Throwable getLastError() {
+        return error;
+    }
+
+    /**
+     * Starts the replication, asynchronously.
+     */
+    @InterfaceAudience.Public
+    public void start() {
+        if (running) {
+            return;
+        }
+        this.sessionID = String.format("repl%03d", ++lastSessionID);
+        Log.v(CBLDatabase.TAG, toString() + " STARTING ...");
+        running = true;
+        lastSequence = null;
+
+        checkSession();
+    }
+
+    /**
+     * Stops replication, asynchronously.
+     */
+    @InterfaceAudience.Public
+    public void stop() {
+        if (!running) {
+            return;
+        }
+        Log.v(CBLDatabase.TAG, toString() + " STOPPING...");
+        batcher.flush();
+        continuous = false;
+        if (asyncTaskCount == 0) {
+            stopped();
+        }
+    }
+
+    /**
+     * Restarts a completed or failed replication.
+     */
+    @InterfaceAudience.Public
+    public void restart() {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Adds a change delegate that will be called whenever the Replication changes.
+     */
+    @InterfaceAudience.Public
+    public void addChangeListener(ChangeListener changeListener) {
+        changeListeners.add(changeListener);
+    }
+
+    /**
+     * Removes the specified delegate as a listener for the Replication change event.
+     */
+    @InterfaceAudience.Public
+    public void removeChangeListener(ChangeListener changeListener) {
+        changeListeners.remove(changeListener);
     }
 
     public void setAuthorizer(CBLAuthorizer authorizer) {
@@ -157,14 +397,6 @@ public abstract class CBLReplicator extends Observable {
 
     public CBLAuthorizer getAuthorizer() {
         return authorizer;
-    }
-
-    public boolean isRunning() {
-        return running;
-    }
-
-    public URL getRemote() {
-        return remote;
     }
 
     public void databaseClosing() {
@@ -178,10 +410,6 @@ public abstract class CBLReplicator extends Observable {
         maskedRemoteWithoutCredentials = maskedRemoteWithoutCredentials.replaceAll("://.*:.*@", "://---:---@");
         String name = getClass().getSimpleName() + "[" + maskedRemoteWithoutCredentials + "]";
         return name;
-    }
-
-    public boolean isPush() {
-        return false;
     }
 
     public String getLastSequence() {
@@ -205,40 +433,18 @@ public abstract class CBLReplicator extends Observable {
         }
     }
 
-    public int getChangesProcessed() {
-        return changesProcessed;
+    void setCompletedChangesCount(int processed) {
+        this.completedChangesCount = processed;
+        notifyChangeListeners();
     }
 
-    public void setChangesProcessed(int processed) {
-        this.changesProcessed = processed;
-        setChanged();
-        notifyObservers();
-    }
-
-    public int getChangesTotal() {
-        return changesTotal;
-    }
-
-    public void setChangesTotal(int total) {
-        this.changesTotal = total;
-        setChanged();
-        notifyObservers();
+    void setChangesCount(int total) {
+        this.changesCount = total;
+        notifyChangeListeners();
     }
 
     public String getSessionID() {
         return sessionID;
-    }
-
-    public void start() {
-        if (running) {
-            return;
-        }
-        this.sessionID = String.format("repl%03d", ++lastSessionID);
-        Log.v(CBLDatabase.TAG, toString() + " STARTING ...");
-        running = true;
-        lastSequence = null;
-
-        checkSession();
     }
 
     protected void checkSession() {
@@ -285,29 +491,24 @@ public abstract class CBLReplicator extends Observable {
 
     public abstract void beginReplicating();
 
-    public void stop() {
-        if (!running) {
-            return;
-        }
-        Log.v(CBLDatabase.TAG, toString() + " STOPPING...");
-        batcher.flush();
-        continuous = false;
-        if (asyncTaskCount == 0) {
-            stopped();
-        }
-    }
 
     public void stopped() {
         Log.v(CBLDatabase.TAG, toString() + " STOPPED");
         running = false;
-        this.changesProcessed = this.changesTotal = 0;
+        this.completedChangesCount = this.changesCount = 0;
 
         saveLastSequence();
-        setChanged();
-        notifyObservers();
+        notifyChangeListeners();
 
         batcher = null;
         db = null;
+    }
+
+    private void notifyChangeListeners() {
+        for (ChangeListener listener : changeListeners) {
+            ChangeEvent changeEvent = new ChangeEvent(this);
+            listener.changed(changeEvent);
+        }
     }
 
     protected void login() {
@@ -390,7 +591,7 @@ public abstract class CBLReplicator extends Observable {
     }
 
     public void sendAsyncRequest(String method, URL url, Object body, CBLRemoteRequestCompletionBlock onCompletion) {
-        CBLRemoteRequest request = new CBLRemoteRequest(workExecutor, clientFacotry, method, url, body, onCompletion);
+        CBLRemoteRequest request = new CBLRemoteRequest(workExecutor, clientFactory, method, url, body, onCompletion);
         remoteRequestExecutor.execute(request);
     }
 
@@ -400,7 +601,7 @@ public abstract class CBLReplicator extends Observable {
             String urlStr = buildRelativeURLString(relativePath);
             URL url = new URL(urlStr);
 
-            CBLRemoteMultipartDownloaderRequest request = new CBLRemoteMultipartDownloaderRequest(workExecutor, clientFacotry, method, url, body, db, onCompletion);
+            CBLRemoteMultipartDownloaderRequest request = new CBLRemoteMultipartDownloaderRequest(workExecutor, clientFactory, method, url, body, db, onCompletion);
             remoteRequestExecutor.execute(request);
         } catch (MalformedURLException e) {
             Log.e(CBLDatabase.TAG, "Malformed URL for async request", e);
@@ -415,7 +616,7 @@ public abstract class CBLReplicator extends Observable {
         } catch (MalformedURLException e) {
             throw new IllegalArgumentException(e);
         }
-        CBLRemoteMultipartRequest request = new CBLRemoteMultipartRequest(workExecutor, clientFacotry, method, url, multiPartEntity, onCompletion);
+        CBLRemoteMultipartRequest request = new CBLRemoteMultipartRequest(workExecutor, clientFactory, method, url, multiPartEntity, onCompletion);
         remoteRequestExecutor.execute(request);
     }
 
@@ -423,7 +624,7 @@ public abstract class CBLReplicator extends Observable {
      * CHECKPOINT STORAGE: *
      */
 
-    public void maybeCreateRemoteDB() {
+     void maybeCreateRemoteDB() {
         // CBLPusher overrides this to implement the .createTarget option
     }
 
@@ -436,13 +637,20 @@ public abstract class CBLReplicator extends Observable {
         if (db == null) {
             return null;
         }
-        String input = db.privateUUID() + "\n" + remote.toExternalForm() + "\n" + (isPush() ? "1" : "0");
+        String input = db.privateUUID() + "\n" + remote.toExternalForm() + "\n" + (!isPull() ? "1" : "0");
         return CBLMisc.TDHexSHA1Digest(input.getBytes());
+    }
+
+    private boolean is404(Throwable e) {
+        if (e instanceof HttpResponseException) {
+            return ((HttpResponseException) e).getStatusCode() == 404;
+        }
+        return false;
     }
 
     public void fetchRemoteCheckpointDoc() {
         lastSequenceChanged = false;
-        final String localLastSequence = db.lastSequenceWithRemoteURL(remote, isPush());
+        final String localLastSequence = db.lastSequenceWithRemoteURL(remote, !isPull());
         if (localLastSequence == null) {
             maybeCreateRemoteDB();
             beginReplicating();
@@ -454,10 +662,12 @@ public abstract class CBLReplicator extends Observable {
 
             @Override
             public void onCompletion(Object result, Throwable e) {
-                if (e != null && e instanceof HttpResponseException && ((HttpResponseException) e).getStatusCode() != 404) {
+                if (e != null && !is404(e)) {
+                    Log.d(CBLDatabase.TAG, this + " error getting remote checkpoint: " + e);
                     error = e;
                 } else {
-                    if (e instanceof HttpResponseException && ((HttpResponseException) e).getStatusCode() == 404) {
+                    if (e != null && is404(e)) {
+                        Log.d(CBLDatabase.TAG, this + " 404 error getting remote checkpoint " + remoteCheckpointDocID() + ", calling maybeCreateRemoteDB");
                         maybeCreateRemoteDB();
                     }
                     Map<String, Object> response = (Map<String, Object>) result;
@@ -525,10 +735,35 @@ public abstract class CBLReplicator extends Observable {
             }
 
         });
-        db.setLastSequence(lastSequence, remote, isPush());
+        db.setLastSequence(lastSequence, remote, !isPull());
     }
 
-    public Throwable getError() {
-        return error;
+    /**
+     * The type of event raised by a Replication when any of the following
+     * properties change: mode, running, error, completed, total.
+     */
+    @InterfaceAudience.Public
+    public static class ChangeEvent {
+
+        private CBLReplicator source;
+
+        public ChangeEvent(CBLReplicator source) {
+            this.source = source;
+        }
+
+        public CBLReplicator getSource() {
+            return source;
+        }
+
     }
+
+    /**
+     * A delegate that can be used to listen for Replication changes.
+     */
+    @InterfaceAudience.Public
+    public static interface ChangeListener {
+        public void changed(ChangeEvent event);
+    }
+
+
 }

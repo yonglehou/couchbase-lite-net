@@ -1,11 +1,10 @@
 package com.couchbase.cblite.testapp.tests;
 
-import android.os.AsyncTask;
-import android.util.Log;
-
 import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker;
 import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker.TDChangeTrackerMode;
 import com.couchbase.cblite.replicator.changetracker.CBLChangeTrackerClient;
+import com.couchbase.cblite.threading.BackgroundTask;
+import com.couchbase.cblite.util.Log;
 
 import junit.framework.Assert;
 
@@ -33,6 +32,7 @@ import java.net.URL;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+
 
 public class ChangeTracker extends CBLiteTestCase {
 
@@ -196,11 +196,10 @@ public class ChangeTracker extends CBLiteTestCase {
 
         final CBLChangeTracker changeTracker = new CBLChangeTracker(testURL, CBLChangeTracker.TDChangeTrackerMode.Continuous, 0, client);
 
-        AsyncTask task = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask task = new BackgroundTask() {
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
                 changeTracker.start();
-                return null;
             }
         };
         task.execute();
@@ -271,11 +270,10 @@ public class ChangeTracker extends CBLiteTestCase {
 
         final CBLChangeTracker changeTracker = new CBLChangeTracker(testURL, TDChangeTrackerMode.LongPoll, 0, client);
 
-        AsyncTask task = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask task = new BackgroundTask() {
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
                 changeTracker.start();
-                return null;
             }
         };
         task.execute();
@@ -321,71 +319,6 @@ public class ChangeTracker extends CBLiteTestCase {
 }
 
 
-
-class MockHttpClient implements org.apache.http.client.HttpClient {
-
-    private int numTimesExecuteCalled = 0;
-
-    public int getNumTimesExecuteCalled() {
-        return numTimesExecuteCalled;
-    }
-
-    @Override
-    public HttpParams getParams() {
-        return null;
-    }
-
-    @Override
-    public ClientConnectionManager getConnectionManager() {
-        return null;
-    }
-
-    @Override
-    public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException, ClientProtocolException {
-        numTimesExecuteCalled++;
-        throw new IOException("Test IOException");
-    }
-
-    @Override
-    public HttpResponse execute(HttpUriRequest httpUriRequest, HttpContext httpContext) throws IOException, ClientProtocolException {
-        numTimesExecuteCalled++;
-        throw new IOException("Test IOException");
-    }
-
-    @Override
-    public HttpResponse execute(HttpHost httpHost, HttpRequest httpRequest) throws IOException, ClientProtocolException {
-        numTimesExecuteCalled++;
-        throw new IOException("Test IOException");
-    }
-
-    @Override
-    public HttpResponse execute(HttpHost httpHost, HttpRequest httpRequest, HttpContext httpContext) throws IOException, ClientProtocolException {
-        numTimesExecuteCalled++;
-        throw new IOException("Test IOException");
-    }
-
-    @Override
-    public <T> T execute(HttpUriRequest httpUriRequest, ResponseHandler<? extends T> responseHandler) throws IOException, ClientProtocolException {
-        throw new IOException("<T> Test IOException");
-    }
-
-    @Override
-    public <T> T execute(HttpUriRequest httpUriRequest, ResponseHandler<? extends T> responseHandler, HttpContext httpContext) throws IOException, ClientProtocolException {
-        throw new IOException("<T> Test IOException");
-    }
-
-    @Override
-    public <T> T execute(HttpHost httpHost, HttpRequest httpRequest, ResponseHandler<? extends T> responseHandler) throws IOException, ClientProtocolException {
-        throw new IOException("<T> Test IOException");
-    }
-
-    @Override
-    public <T> T execute(HttpHost httpHost, HttpRequest httpRequest, ResponseHandler<? extends T> responseHandler, HttpContext httpContext) throws IOException, ClientProtocolException {
-        throw new IOException("<T> Test IOException");
-    }
-
-
-}
 
 class MockHttpClientNeverResponds implements org.apache.http.client.HttpClient {
 

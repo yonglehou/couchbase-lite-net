@@ -17,15 +17,10 @@
 
 package com.couchbase.cblite;
 
-import android.net.Uri;
-
 import com.couchbase.cblite.internal.CBLAttachmentInternal;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.internal.InterfaceAudience;
 
-import java.io.File;
 import java.io.InputStream;
-import java.net.URL;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -35,7 +30,12 @@ public class CBLAttachment {
     /**
      * The owning document revision.
      */
-    private CBLRevisionBase revision;
+    private CBLRevision revision;
+
+    /**
+     * Whether or not this attachment is gzipped
+     */
+    private boolean gzipped;
 
     /**
      * The owning document.
@@ -58,67 +58,82 @@ public class CBLAttachment {
     private InputStream body;
 
     /**
-     * Public Constructor
+     * Constructor
      */
-    public CBLAttachment(InputStream contentStream, String contentType) {
+    CBLAttachment(InputStream contentStream, String contentType) {
         this.body = contentStream;
         metadata = new HashMap<String, Object>();
         metadata.put("content_type", contentType);
         metadata.put("follows", true);
+        this.gzipped = false;
+    }
+
+    /**
+     * Constructor
+     */
+    CBLAttachment(CBLRevision revision, String name, Map<String, Object> metadata) {
+        this.revision = revision;
+        this.name = name;
+        this.metadata = metadata;
+        this.gzipped = false;
+
+    }
+
+    /**
+     * Get the owning document revision.
+     */
+    @InterfaceAudience.Public
+    public CBLRevision getRevision() {
+        return revision;
     }
 
 
     /**
-     * Package Private Constructor
+     * Get the owning document.
      */
-    CBLAttachment(CBLRevisionBase revision, String name, Map<String, Object> metadata) {
-        this.revision = revision;
-        this.name = name;
-        this.metadata = metadata;
+    @InterfaceAudience.Public
+    public CBLDocument getDocument() {
+        return document;
     }
 
-    public InputStream getBody() throws CBLiteException {
+    /**
+     * Get the filename.
+     */
+    @InterfaceAudience.Public
+    public String getName() {
+        return name;
+    }
+
+    /**
+     * Get the MIME type of the contents.
+     */
+    @InterfaceAudience.Public
+    public String getContentType() {
+        return (String) metadata.get("content_type");
+    }
+
+
+    /**
+     * Get the content (aka 'body') data.
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public InputStream getContent() throws CBLiteException {
         if (body != null) {
             return body;
         }
         else {
             CBLDatabase db = revision.getDatabase();
             CBLAttachment attachment = db.getAttachmentForSequence(revision.getSequence(), this.name);
-            body = attachment.getBody();
+            body = attachment.getContent();
             return body;
         }
     }
 
     /**
-     * Get the MIME type of the contents.
-     */
-    public String getContentType() {
-        return (String) metadata.get("content_type");
-    }
-
-    public CBLDocument getDocument() {
-        return document;
-    }
-
-    public CBLRevisionBase getRevision() {
-        return revision;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    void setName(String name) {
-        this.name = name;
-    }
-
-    void setRevision(CBLRevisionBase revision) {
-        this.revision = revision;
-    }
-
-    /**
      * Get the length in bytes of the contents.
      */
+    @InterfaceAudience.Public
     public long getLength() {
         Long length = (Long) metadata.get("length");
         if (length != null) {
@@ -129,44 +144,24 @@ public class CBLAttachment {
         }
     }
 
+    /**
+     * The CouchbaseLite metadata about the attachment, that lives in the document.
+     */
+    @InterfaceAudience.Public
     public Map<String, Object> getMetadata() {
         return Collections.unmodifiableMap(metadata);
     }
 
-    /**
-     * Get the URL of the file containing the body.
-     * This is read-only! DO NOT MODIFY OR DELETE THIS FILE.
-     */
-    public Uri getBodyURL() {
-        try {
-            CBLDatabase db = revision.getDatabase();
-            String filePath = db.getAttachmentPathForSequence(revision.getSequence(), name);
-            if (filePath != null && filePath.length() > 0) {
-                return Uri.fromFile(new File(filePath));
-            }
-            return null;
-        } catch (CBLiteException e) {
-            throw new RuntimeException(e);
-        }
+    void setName(String name) {
+        this.name = name;
+    }
+
+    void setRevision(CBLRevision revision) {
+        this.revision = revision;
     }
 
     InputStream getBodyIfNew() {
         return body;
-    }
-
-    /**
-     * Updates the body, creating a new document revision in the process.
-     * If all you need to do to a document is update a single attachment this is an easy way
-     * to do it; but if you need to change multiple attachments, or change other body
-     * properties, do them in one step by calling putProperties on the revision
-     * or document.
-     * @param body  The new body, or nil to delete the attachment.
-     * @param contentType  The new content type, or nil to leave it the same.
-     */
-    public CBLRevision update(InputStream body, String contentType) throws CBLiteException {
-        CBLDatabase db = revision.getDatabase();
-        CBLRevisionInternal newRevisionInternal = db.updateAttachment(name, body, contentType, revision.getDocument().getId(), revision.getId());
-        return new CBLRevision(document, newRevisionInternal);
     }
 
     /**
@@ -205,6 +200,15 @@ public class CBLAttachment {
         writer.read(body);
         writer.finish();
         return writer;
+
+    }
+
+    public boolean getGZipped() {
+        return gzipped;
+    }
+
+    public void setGZipped(boolean gzipped) {
+        this.gzipped = gzipped;
     }
 
 

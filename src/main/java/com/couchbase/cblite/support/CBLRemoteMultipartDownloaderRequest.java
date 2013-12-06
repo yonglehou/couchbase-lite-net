@@ -1,9 +1,8 @@
 package com.couchbase.cblite.support;
 
-import android.util.Log;
-
 import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLServer;
+import com.couchbase.cblite.CBLManager;
+import com.couchbase.cblite.util.Log;
 
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
@@ -75,7 +74,8 @@ public class CBLRemoteMultipartDownloaderRequest extends CBLRemoteRequest {
                 Header contentTypeHeader = entity.getContentType();
                 InputStream inputStream = null;
 
-                if (contentTypeHeader.getValue().contains("multipart/related")) {
+                if (contentTypeHeader != null
+                        && contentTypeHeader.getValue().contains("multipart/related")) {
 
                     try {
                         CBLMultipartDocumentReader reader = new CBLMultipartDocumentReader(response, db);
@@ -113,7 +113,7 @@ public class CBLRemoteMultipartDownloaderRequest extends CBLRemoteRequest {
                     if (entity != null) {
                         try {
                             inputStream = entity.getContent();
-                            fullBody = CBLServer.getObjectMapper().readValue(inputStream,
+                            fullBody = CBLManager.getObjectMapper().readValue(inputStream,
                                     Object.class);
                             respondWithResult(fullBody, error);
                         } finally {

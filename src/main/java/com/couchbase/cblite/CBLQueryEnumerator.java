@@ -1,19 +1,25 @@
 package com.couchbase.cblite;
 
+import com.couchbase.cblite.internal.InterfaceAudience;
+
+import java.util.Iterator;
 import java.util.List;
 
 /**
  * Enumerator on a CBLQuery's result rows.
  * The objects returned are instances of CBLQueryRow.
  */
-public class CBLQueryEnumerator {
+public class CBLQueryEnumerator implements Iterator<CBLQueryRow> {
 
     private CBLDatabase database;
     private List<CBLQueryRow> rows;
     private int nextRow;
     private long sequenceNumber;
-    private CBLStatus status;
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     CBLQueryEnumerator(CBLDatabase database, List<CBLQueryRow> rows, long sequenceNumber) {
         this.database = database;
         this.rows = rows;
@@ -25,18 +31,56 @@ public class CBLQueryEnumerator {
         }
     }
 
-    CBLQueryEnumerator(CBLDatabase database, CBLStatus status) {
-        this.database = database;
-        this.status = status;
-    }
-
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     CBLQueryEnumerator(CBLQueryEnumerator other) {
         this.database = other.database;
         this.rows = other.rows;
         this.sequenceNumber = other.sequenceNumber;
     }
 
+    /**
+     * Gets the number of rows in the QueryEnumerator.
+     */
+    @InterfaceAudience.Public
+    public int getCount() {
+        return rows.size();
+    }
+
+    /**
+     * Gets the Database's current sequence number at the time the View was generated for the results.
+     */
+    @InterfaceAudience.Public
+    public long getSequenceNumber() {
+        return sequenceNumber;
+    }
+
+    /**
+     * Gets the next CBLQueryRow from the results, or null
+     * if there are no more results.
+     */
     @Override
+    @InterfaceAudience.Public
+    public CBLQueryRow next() {
+        if (nextRow >= rows.size()) {
+            return null;
+        }
+        return rows.get(nextRow++);
+    }
+
+    /**
+     * Gets the QueryRow at the specified index in the results.
+     */
+    @InterfaceAudience.Public
+    public CBLQueryRow getRow(int index) {
+        return rows.get(index);
+    }
+
+
+    @Override
+    @InterfaceAudience.Public
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
@@ -48,30 +92,39 @@ public class CBLQueryEnumerator {
         return true;
     }
 
-    public CBLQueryRow getRowAtIndex(int index) {
-        return rows.get(index);
-    }
-
-    public int getCount() {
-        return rows.size();
-    }
-
-    public CBLQueryRow getNextRow() {
-        if (nextRow >= rows.size()) {
-            return null;
-        }
-        return rows.get(nextRow++);
+    /**
+     * Required to satisfy java Iterator interface
+     */
+    @Override
+    @InterfaceAudience.Public
+    public boolean hasNext() {
+        return nextRow < rows.size();
     }
 
     /**
-     * TODO: in the spec this is called getError() and returns an "Error" object.
-     * @return
+     * Required to satisfy java Iterator interface
      */
-    public CBLStatus getStatus() {
-        return status;
+    @Override
+    @InterfaceAudience.Public
+    public void remove() {
+        throw new UnsupportedOperationException("CBLQueryEnumerator does not allow remove() to be called");
     }
 
-    public long getSequenceNumber() {
-        return sequenceNumber;
+    /**
+     * True if the database has changed since the view was generated.
+     */
+    @InterfaceAudience.Public
+    public boolean isStale() {
+        return sequenceNumber < database.getLastSequenceNumber();
     }
+
+    /**
+     * Resets the enumeration so the next call to -nextObject or -nextRow will return the first row.
+     */
+    @InterfaceAudience.Public
+    public void reset() {
+        nextRow = 0;
+    }
+
+
 }

@@ -17,20 +17,19 @@
 
 package com.couchbase.cblite.testapp.tests;
 
+import com.couchbase.cblite.CBLChangesOptions;
+import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.CBLRevisionList;
+import com.couchbase.cblite.CBLiteException;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+
+import junit.framework.Assert;
+
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import junit.framework.Assert;
-
-import com.couchbase.cblite.CBLChangesOptions;
-import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLiteException;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.CBLRevisionList;
-import com.couchbase.cblite.CBLStatus;
 
 public class RevTree extends CBLiteTestCase {
 
@@ -105,10 +104,10 @@ public class RevTree extends CBLiteTestCase {
         CBLRevisionInternal rev2 = database.getDocumentWithIDAndRev(rev.getDocId(), "2-too", EnumSet.noneOf(CBLDatabase.TDContentOptions.class));
         Assert.assertEquals(rev.getDocId(), rev2.getDocId());
         Assert.assertEquals("2-too", rev2.getRevId());
-        //Assert.assertNull(rev2.getBody());
+        //Assert.assertNull(rev2.getContent());
 
         // Make sure no duplicate rows were inserted for the common revisions:
-        Assert.assertEquals(8, database.getLastSequence());
+        Assert.assertEquals(8, database.getLastSequenceNumber());
 
         // Make sure the revision with the higher revID wins the conflict:
         CBLRevisionInternal current = database.getDocumentWithIDAndRev(rev.getDocId(), null, EnumSet.noneOf(CBLDatabase.TDContentOptions.class));

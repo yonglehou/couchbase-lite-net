@@ -18,7 +18,6 @@
 package com.couchbase.cblite.internal;
 
 import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLStatus;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -45,10 +44,6 @@ public class CBLRevisionInternal {
         this.database = database;
     }
 
-    public CBLRevisionInternal(Map<String, Object>properties) {
-        this.body = new CBLBody(properties);
-    }
-
     public CBLRevisionInternal(CBLBody body, CBLDatabase database) {
         this((String)body.getPropertyForKey("_id"),
                 (String)body.getPropertyForKey("_rev"),
@@ -62,9 +57,16 @@ public class CBLRevisionInternal {
     }
 
     public Map<String,Object> getProperties() {
-        Map<String,Object> result = null;
+        Map<String,Object> result = new HashMap<String, Object>();
         if(body != null) {
-            result = body.getProperties();
+            Map<String, Object> prop;
+            try{
+                prop = body.getProperties();
+            }  catch (IllegalStateException e){
+                // handle when both object and json are null for this body
+                return result;
+                }
+            result.putAll(prop);
         }
         return result;
     }
@@ -173,10 +175,9 @@ public class CBLRevisionInternal {
         assert((docId != null) && (revId != null));
         assert((this.docId == null) || (this.docId.equals(docId)));
         CBLRevisionInternal result = new CBLRevisionInternal(docId, revId, deleted, database);
-        Map<String, Object> properties = getProperties();
-        if(properties == null) {
-            properties = new HashMap<String, Object>();
-        }
+        Map<String, Object> unmodifiableProperties = getProperties();
+        Map<String, Object> properties = new HashMap<String, Object>();
+        properties.putAll(unmodifiableProperties);
         properties.put("_id", docId);
         properties.put("_rev", revId);
         result.setProperties(properties);

@@ -1,15 +1,18 @@
 package com.couchbase.cblite;
 
+import com.couchbase.cblite.internal.InterfaceAudience;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Future;
 
 /**
  * Represents a query of a CouchbaseLite 'view', or of a view-like resource like _all_documents.
  */
 public class CBLQuery {
 
-    public enum CBLStaleness {
-        CBLStaleNever, CBLStaleOK, CBLStaleUpdateAfter
+    public enum CBLIndexUpdateMode {
+        NEVER, BEFORE, AFTER
     }
 
     /**
@@ -64,7 +67,7 @@ public class CBLQuery {
      * If set, the view will not be updated for this query, even if the database has changed.
      * This allows faster results at the expense of returning possibly out-of-date data.
      */
-    private CBLStaleness stale;
+    private CBLIndexUpdateMode indexUpdateMode;
 
     /**
      * Should the rows be returned in descending key order? Default value is NO.
@@ -86,7 +89,7 @@ public class CBLQuery {
     private boolean mapOnly;
 
     /**
-     * If set to YES, queries created by -queryAllDocuments will include deleted documents.
+     * If set to YES, queries created by -createAllDocumentsQuery will include deleted documents.
      * This property has no effect in other types of queries.
      */
     private boolean includeDeleted;
@@ -101,22 +104,40 @@ public class CBLQuery {
      */
     private int groupLevel;
 
-    private long lastSequence;
-    private CBLStatus status;  // Result status of last query (.error property derived from this)
+    /**
+     * If a query is running and the user calls stop() on this query, the future
+     * will be used in order to cancel the query in progress.
+     */
+    protected Future updateQueryFuture;
 
+    private long lastSequence;
+
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     CBLQuery(CBLDatabase database, CBLView view) {
         this.database = database;
         this.view = view;
         limit = Integer.MAX_VALUE;
-        mapOnly = (view.getReduce() == null);
+        mapOnly = (view != null && view.getReduce() == null);
+        indexUpdateMode = CBLIndexUpdateMode.NEVER;
     }
 
-    CBLQuery(CBLDatabase database, CBLMapFunction mapFunction) {
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
+    CBLQuery(CBLDatabase database, CBLMapper mapFunction) {
         this(database, database.makeAnonymousView());
         temporaryView = true;
         view.setMap(mapFunction, "");
     }
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     CBLQuery(CBLDatabase database, CBLQuery query) {
         this(database, query.getView());
         limit = query.limit;
@@ -130,35 +151,169 @@ public class CBLQuery {
         mapOnly = query.mapOnly;
         startKeyDocId = query.startKeyDocId;
         endKeyDocId = query.endKeyDocId;
-        stale = query.stale;
+        indexUpdateMode = query.indexUpdateMode;
+    }
+
+    /**
+     * The database this query is associated with
+     */
+    @InterfaceAudience.Public
+    public CBLDatabase getDatabase() {
+        return database;
+    }
+
+    @InterfaceAudience.Public
+    public int getLimit() {
+        return limit;
+    }
+
+    @InterfaceAudience.Public
+    public void setLimit(int limit) {
+        this.limit = limit;
+    }
+
+
+    @InterfaceAudience.Public
+    public int getSkip() {
+        return skip;
+    }
+
+    @InterfaceAudience.Public
+    public void setSkip(int skip) {
+        this.skip = skip;
+    }
+
+    @InterfaceAudience.Public
+    public boolean isDescending() {
+        return descending;
+    }
+
+    @InterfaceAudience.Public
+    public void setDescending(boolean descending) {
+        this.descending = descending;
+    }
+
+    @InterfaceAudience.Public
+    public Object getStartKey() {
+        return startKey;
+    }
+
+    @InterfaceAudience.Public
+    public void setStartKey(Object startKey) {
+        this.startKey = startKey;
+    }
+
+    @InterfaceAudience.Public
+    public Object getEndKey() {
+        return endKey;
+    }
+
+    @InterfaceAudience.Public
+    public void setEndKey(Object endKey) {
+        this.endKey = endKey;
+    }
+
+    @InterfaceAudience.Public
+    public String getStartKeyDocId() {
+        return startKeyDocId;
+    }
+
+    @InterfaceAudience.Public
+    public void setStartKeyDocId(String startKeyDocId) {
+        this.startKeyDocId = startKeyDocId;
+    }
+
+    @InterfaceAudience.Public
+    public String getEndKeyDocId() {
+        return endKeyDocId;
+    }
+
+    @InterfaceAudience.Public
+    public void setEndKeyDocId(String endKeyDocId) {
+        this.endKeyDocId = endKeyDocId;
+    }
+
+    @InterfaceAudience.Public
+    public CBLIndexUpdateMode getIndexUpdateMode() {
+        return indexUpdateMode;
+    }
+
+    @InterfaceAudience.Public
+    public void setIndexUpdateMode(CBLIndexUpdateMode indexUpdateMode) {
+        this.indexUpdateMode = indexUpdateMode;
+    }
+
+    @InterfaceAudience.Public
+    public List<Object> getKeys() {
+        return keys;
+    }
+
+    @InterfaceAudience.Public
+    public void setKeys(List<Object> keys) {
+        this.keys = keys;
+    }
+
+    @InterfaceAudience.Public
+    public boolean isMapOnly() {
+        return mapOnly;
+    }
+
+    @InterfaceAudience.Public
+    public void setMapOnly(boolean mapOnly) {
+        this.mapOnly = mapOnly;
+    }
+
+    @InterfaceAudience.Public
+    public int getGroupLevel() {
+        return groupLevel;
+    }
+
+    @InterfaceAudience.Public
+    public void setGroupLevel(int groupLevel) {
+        this.groupLevel = groupLevel;
+    }
+
+    @InterfaceAudience.Public
+    public boolean shouldPrefetch() {
+        return prefetch;
+    }
+
+    @InterfaceAudience.Public
+    public void setPrefetch(boolean prefetch) {
+        this.prefetch = prefetch;
+    }
+
+    @InterfaceAudience.Public
+    public boolean shouldIncludeDeleted() {
+        return includeDeleted;
+    }
+
+    @InterfaceAudience.Public
+    public void setIncludeDeleted(boolean includeDeleted) {
+        this.includeDeleted = includeDeleted;
     }
 
     /**
      * Sends the query to the server and returns an enumerator over the result rows (Synchronous).
      * If the query fails, this method returns nil and sets the query's .error property.
      */
-    public CBLQueryEnumerator getRows() throws CBLiteException {
+    @InterfaceAudience.Public
+    public CBLQueryEnumerator run() throws CBLiteException {
         List<Long> outSequence = new ArrayList<Long>();
-        List<CBLQueryRow> rows = database.queryViewNamed(view.getName(), getQueryOptions(), outSequence);
-        long lastSequence = outSequence.get(0);
+        String viewName = (view != null) ? view.getName() : null;
+        List<CBLQueryRow> rows = database.queryViewNamed(viewName, getQueryOptions(), outSequence);
+        lastSequence = outSequence.get(0);
         return new CBLQueryEnumerator(database, rows, lastSequence);
-    }
-
-    /**
-     * Same as -rows, except returns nil if the query results have not changed since the last time it
-     * was evaluated (Synchronous).
-     */
-    public CBLQueryEnumerator getRowsIfChanged() throws CBLiteException {
-        if (database.getLastSequence() == lastSequence) {
-            return null;
-        }
-        return getRows();
     }
 
     /**
      * Returns a live query with the same parameters.
      */
+    @InterfaceAudience.Public
     public CBLLiveQuery toLiveQuery() {
+        if (view == null) {
+            throw new IllegalStateException("Cannot convert a CBLQuery to CBLLiveQuery if the view is null");
+        }
         return new CBLLiveQuery(this);
     }
 
@@ -168,12 +323,15 @@ public class CBLQuery {
      *  a non-nil enumerator but its .error property will be set to a value reflecting the error.
      *  The originating CBLQuery's .error property will NOT change.
      */
-    public void runAsync(final CBLQueryCompleteFunction queryCompleteFunction) {
-        runAsyncInternal(queryCompleteFunction);
+    @InterfaceAudience.Public
+    public Future runAsync(final QueryCompleteListener onComplete) {
+        return runAsyncInternal(onComplete);
     }
 
-    Thread runAsyncInternal(final CBLQueryCompleteFunction queryCompleteFunction) {
-        Thread t = new Thread(new Runnable() {
+    @InterfaceAudience.Private
+    Future runAsyncInternal(final QueryCompleteListener onComplete) {
+
+        return database.getManager().runAsync(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -183,127 +341,18 @@ public class CBLQuery {
                     List<CBLQueryRow> rows = database.queryViewNamed(viewName, options, outSequence);
                     long sequenceNumber = outSequence.get(0);
                     CBLQueryEnumerator enumerator = new CBLQueryEnumerator(database, rows, sequenceNumber);
-                    queryCompleteFunction.onQueryChanged(enumerator);
+                    onComplete.completed(enumerator, null);
 
-                } catch (CBLiteException e) {
-                    queryCompleteFunction.onFailureQueryChanged(e);
+                } catch (Throwable t) {
+                    onComplete.completed(null, t);
                 }
             }
         });
-        t.start();
-        return t;
+
     }
 
     public CBLView getView() {
         return view;
-    }
-
-    public CBLDatabase getDatabase() {
-        return database;
-    }
-
-    public int getSkip() {
-        return skip;
-    }
-
-    public void setSkip(int skip) {
-        this.skip = skip;
-    }
-
-    public int getLimit() {
-        return limit;
-    }
-
-    public void setLimit(int limit) {
-        this.limit = limit;
-    }
-
-    public boolean isDescending() {
-        return descending;
-    }
-
-    public void setDescending(boolean descending) {
-        this.descending = descending;
-    }
-
-    public Object getStartKey() {
-        return startKey;
-    }
-
-    public void setStartKey(Object startKey) {
-        this.startKey = startKey;
-    }
-
-    public Object getEndKey() {
-        return endKey;
-    }
-
-    public void setEndKey(Object endKey) {
-        this.endKey = endKey;
-    }
-
-    public String getStartKeyDocId() {
-        return startKeyDocId;
-    }
-
-    public void setStartKeyDocId(String startKeyDocId) {
-        this.startKeyDocId = startKeyDocId;
-    }
-
-    public String getEndKeyDocId() {
-        return endKeyDocId;
-    }
-
-    public void setEndKeyDocId(String endKeyDocId) {
-        this.endKeyDocId = endKeyDocId;
-    }
-
-    public CBLStaleness getStale() {
-        return stale;
-    }
-
-    public void setStale(CBLStaleness stale) {
-        this.stale = stale;
-    }
-
-    public List<Object> getKeys() {
-        return keys;
-    }
-
-    public void setKeys(List<Object> keys) {
-        this.keys = keys;
-    }
-
-    public boolean isPrefetch() {
-        return prefetch;
-    }
-
-    public void setPrefetch(boolean prefetch) {
-        this.prefetch = prefetch;
-    }
-
-    public boolean isMapOnly() {
-        return mapOnly;
-    }
-
-    public void setMapOnly(boolean mapOnly) {
-        this.mapOnly = mapOnly;
-    }
-
-    public boolean isIncludeDeleted() {
-        return includeDeleted;
-    }
-
-    public void setIncludeDeleted(boolean includeDeleted) {
-        this.includeDeleted = includeDeleted;
-    }
-
-    public int getGroupLevel() {
-        return groupLevel;
-    }
-
-    public void setGroupLevel(int groupLevel) {
-        this.groupLevel = groupLevel;
     }
 
     private CBLQueryOptions getQueryOptions() {
@@ -318,11 +367,11 @@ public class CBLQuery {
         queryOptions.setReduceSpecified(true);
         queryOptions.setGroupLevel(getGroupLevel());
         queryOptions.setDescending(isDescending());
-        queryOptions.setIncludeDocs(isPrefetch());
+        queryOptions.setIncludeDocs(shouldPrefetch());
         queryOptions.setUpdateSeq(true);
         queryOptions.setInclusiveEnd(true);
-        queryOptions.setIncludeDeletedDocs(isIncludeDeleted());
-        queryOptions.setStale(getStale());
+        queryOptions.setIncludeDeletedDocs(shouldIncludeDeleted());
+        queryOptions.setStale(getIndexUpdateMode());
         return queryOptions;
     }
 
@@ -333,5 +382,11 @@ public class CBLQuery {
             view.delete();
         }
     }
+
+    public static interface QueryCompleteListener {
+        public void completed(CBLQueryEnumerator rows, Throwable error);
+    }
+
+
 
 }

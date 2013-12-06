@@ -17,16 +17,17 @@
 
 package com.couchbase.cblite.internal;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import org.codehaus.jackson.map.ObjectWriter;
 
-import android.util.Log;
+import com.couchbase.cblite.util.Log;
 
 import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLServer;
+import com.couchbase.cblite.CBLManager;
 
 /**
  * A request/response/document body, stored as either JSON or a Map<String,Object>
@@ -35,7 +36,6 @@ public class CBLBody {
 
     private byte[] json;
     private Object object;
-    private boolean error = false;
 
     public CBLBody(byte[] json) {
         this.json = json;
@@ -59,43 +59,64 @@ public class CBLBody {
         return result;
     }
 
-    public boolean isValidJSON() {
-
-        if (object == null) {
-            getObject();
-        }
-
-        // Yes, this is just like asObject except it doesn't warn.
-        if(json == null && !error) {
-            try {
-                json = CBLServer.getObjectMapper().writeValueAsBytes(object);
-            } catch (Exception e) {
-                error = true;
-            }
-        }
-        return (object != null);
-    }
-
     public byte[] getJson() {
-        if(json == null && !error) {
-            try {
-                json = CBLServer.getObjectMapper().writeValueAsBytes(object);
-            } catch (Exception e) {
-                Log.w(CBLDatabase.TAG, "CBLBody: couldn't convert JSON");
-                error = true;
-            }
+        if (json == null) {
+            lazyLoadJsonFromObject();
         }
         return json;
+    }
+
+    private void lazyLoadJsonFromObject() {
+        if (object == null) {
+            throw new IllegalStateException("Both json and object are null for this body: " + this);
+        }
+        try {
+            json = CBLManager.getObjectMapper().writeValueAsBytes(object);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public Object getObject() {
+        if (object == null) {
+            lazyLoadObjectFromJson();
+        }
+        return object;
+    }
+
+    private void lazyLoadObjectFromJson() {
+        if (json == null) {
+            throw new IllegalStateException("Both object and json are null for this body: " + this);
+        }
+        try {
+            object = CBLManager.getObjectMapper().readValue(json, Object.class);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public boolean isValidJSON() {
+        if (object == null) {
+            boolean gotException = false;
+            if (json == null) {
+                throw new IllegalStateException("Both object and json are null for this body: " + this);
+            }
+            try {
+                object = CBLManager.getObjectMapper().readValue(json, Object.class);
+            } catch (IOException e) {
+            }
+        }
+        return object != null;
     }
 
     public byte[] getPrettyJson() {
         Object properties = getObject();
         if(properties != null) {
-            ObjectWriter writer = CBLServer.getObjectMapper().writerWithDefaultPrettyPrinter();
+            ObjectWriter writer = CBLManager.getObjectMapper().writerWithDefaultPrettyPrinter();
             try {
                 json = writer.writeValueAsBytes(properties);
-            } catch (Exception e) {
-                error = true;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
         }
         return getJson();
@@ -103,20 +124,6 @@ public class CBLBody {
 
     public String getJSONString() {
         return new String(getJson());
-    }
-
-    public Object getObject() {
-        if(object == null && !error) {
-            try {
-                if(json != null) {
-                    object = CBLServer.getObjectMapper().readValue(json, Map.class);
-                }
-            } catch (Exception e) {
-                Log.w(CBLDatabase.TAG, "CBLBody: couldn't parse JSON: " + new String(json), e);
-                error = true;
-            }
-        }
-        return object;
     }
 
     @SuppressWarnings("unchecked")
@@ -134,7 +141,4 @@ public class CBLBody {
         return theProperties.get(key);
     }
 
-    public boolean isError() {
-        return error;
-    }
 }

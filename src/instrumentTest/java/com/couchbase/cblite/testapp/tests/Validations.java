@@ -1,16 +1,18 @@
 package com.couchbase.cblite.testapp.tests;
 
-import java.util.HashMap;
-import java.util.Map;
 
-import junit.framework.Assert;
-import android.util.Log;
-
-import com.couchbase.cblite.CBLiteException;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
 import com.couchbase.cblite.CBLStatus;
 import com.couchbase.cblite.CBLValidationBlock;
 import com.couchbase.cblite.CBLValidationContext;
+import com.couchbase.cblite.CBLiteException;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.util.Log;
+
+import junit.framework.Assert;
+
+import java.util.HashMap;
+import java.util.Map;
+
 
 public class Validations extends CBLiteTestCase {
 
@@ -38,7 +40,7 @@ public class Validations extends CBLiteTestCase {
             }
         };
 
-        database.defineValidation("hoopy", validationBlock);
+        database.setValidation("hoopy", validationBlock);
 
         // POST a valid new document:
         Map<String, Object> props = new HashMap<String,Object>();
@@ -63,9 +65,14 @@ public class Validations extends CBLiteTestCase {
         props.remove("towel");
         rev.setProperties(props);
         validationCalled = false;
-        rev = database.putRevision(rev, rev.getRevId(), false, status);
+        boolean gotExpectedError = false;
+        try {
+            rev = database.putRevision(rev, rev.getRevId(), false, status);
+        } catch (CBLiteException e) {
+            gotExpectedError = (e.getCBLStatus().getCode() == CBLStatus.FORBIDDEN);
+        }
         Assert.assertTrue(validationCalled);
-        Assert.assertEquals(CBLStatus.FORBIDDEN, status.getCode());
+        Assert.assertTrue(gotExpectedError);
 
         // POST an invalid new document:
         props = new HashMap<String,Object>();
@@ -73,9 +80,14 @@ public class Validations extends CBLiteTestCase {
         props.put("poetry", true);
         rev = new CBLRevisionInternal(props, database);
         validationCalled = false;
-        rev = database.putRevision(rev, null, false, status);
+        gotExpectedError = false;
+        try {
+            rev = database.putRevision(rev, null, false, status);
+        } catch (CBLiteException e) {
+            gotExpectedError = (e.getCBLStatus().getCode() == CBLStatus.FORBIDDEN);
+        }
         Assert.assertTrue(validationCalled);
-        Assert.assertEquals(CBLStatus.FORBIDDEN, status.getCode());
+        Assert.assertTrue(gotExpectedError);
 
         // PUT a valid new document with an ID:
         props = new HashMap<String,Object>();
@@ -86,7 +98,6 @@ public class Validations extends CBLiteTestCase {
         validationCalled = false;
         rev = database.putRevision(rev, null, false, status);
         Assert.assertTrue(validationCalled);
-        Assert.assertEquals(CBLStatus.CREATED, status.getCode());
         Assert.assertEquals("ford", rev.getDocId());
 
         // DELETE a document:
@@ -95,7 +106,6 @@ public class Validations extends CBLiteTestCase {
         validationCalled = false;
         rev = database.putRevision(rev, rev.getRevId(), false, status);
         Assert.assertTrue(validationCalled);
-        Assert.assertEquals(CBLStatus.OK, status.getCode());
 
         // PUT an invalid new document:
         props = new HashMap<String,Object>();
@@ -103,9 +113,14 @@ public class Validations extends CBLiteTestCase {
         props.put("name","Pot of Petunias");
         rev = new CBLRevisionInternal(props, database);
         validationCalled = false;
-        rev = database.putRevision(rev, null, false, status);
+        gotExpectedError = false;
+        try {
+            rev = database.putRevision(rev, null, false, status);
+        } catch (CBLiteException e) {
+            gotExpectedError = (e.getCBLStatus().getCode() == CBLStatus.FORBIDDEN);
+        }
         Assert.assertTrue(validationCalled);
-        Assert.assertEquals(CBLStatus.FORBIDDEN, status.getCode());
+        Assert.assertTrue(gotExpectedError);
     }
 
 }

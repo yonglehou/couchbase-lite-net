@@ -1,16 +1,21 @@
 package com.couchbase.cblite.testapp.tests;
 
-import android.os.AsyncTask;
-import android.util.Log;
 
-import com.couchbase.cblite.internal.CBLBody;
 import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.CBLEmitter;
+import com.couchbase.cblite.CBLLiveQuery;
+import com.couchbase.cblite.CBLMapper;
 import com.couchbase.cblite.CBLStatus;
+import com.couchbase.cblite.CBLView;
 import com.couchbase.cblite.auth.CBLFacebookAuthorizer;
+import com.couchbase.cblite.internal.CBLBody;
 import com.couchbase.cblite.internal.CBLRevisionInternal;
 import com.couchbase.cblite.replicator.CBLPusher;
 import com.couchbase.cblite.replicator.CBLReplicator;
 import com.couchbase.cblite.support.Base64;
+import com.couchbase.cblite.support.HttpClientFactory;
+import com.couchbase.cblite.threading.BackgroundTask;
+import com.couchbase.cblite.util.Log;
 
 import junit.framework.Assert;
 
@@ -20,6 +25,7 @@ import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.StatusLine;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.StringEntity;
@@ -78,17 +84,16 @@ public class Replicator extends CBLiteTestCase {
         database.putRevision(new CBLRevisionInternal(documentProperties, database), null, false, status);
         Assert.assertEquals(CBLStatus.CREATED, status.getCode());
 
-        final CBLReplicator repl = database.getReplicator(remote, true, false, server.getWorkExecutor());
+        final CBLReplicator repl = database.getReplicator(remote, true, false, manager.getWorkExecutor());
         ((CBLPusher)repl).setCreateTarget(true);
 
-        AsyncTask replicationTask = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask replicationTask = new BackgroundTask() {
 
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
                 // Push them to the remote:
                 repl.start();
                 Assert.assertTrue(repl.isRunning());
-                return null;
             }
 
         };
@@ -113,10 +118,10 @@ public class Replicator extends CBLiteTestCase {
         Log.d(TAG, "Send http request to " + pathToDoc);
 
         final CountDownLatch httpRequestDoneSignal = new CountDownLatch(1);
-        AsyncTask getDocTask = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask getDocTask = new BackgroundTask() {
 
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
 
                 org.apache.http.client.HttpClient httpclient = new DefaultHttpClient();
 
@@ -146,7 +151,6 @@ public class Replicator extends CBLiteTestCase {
                 }
 
                 httpRequestDoneSignal.countDown();
-                return null;
             }
 
 
@@ -197,17 +201,16 @@ public class Replicator extends CBLiteTestCase {
         CBLRevisionInternal rev2 = database.putRevision(new CBLRevisionInternal(documentProperties, database), rev1.getRevId(), false, status);
         Assert.assertTrue(status.getCode() >= 200 && status.getCode() < 300);
 
-        final CBLReplicator repl = database.getReplicator(remote, true, false, server.getWorkExecutor());
+        final CBLReplicator repl = database.getReplicator(remote, true, false, manager.getWorkExecutor());
         ((CBLPusher)repl).setCreateTarget(true);
 
-        AsyncTask replicationTask = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask replicationTask = new BackgroundTask() {
 
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
                 // Push them to the remote:
                 repl.start();
                 Assert.assertTrue(repl.isRunning());
-                return null;
             }
 
         };
@@ -231,10 +234,10 @@ public class Replicator extends CBLiteTestCase {
         Log.d(TAG, "Send http request to " + pathToDoc);
 
         final CountDownLatch httpRequestDoneSignal = new CountDownLatch(1);
-        AsyncTask getDocTask = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask getDocTask = new BackgroundTask() {
 
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
 
                 org.apache.http.client.HttpClient httpclient = new DefaultHttpClient();
 
@@ -244,8 +247,8 @@ public class Replicator extends CBLiteTestCase {
                     response = httpclient.execute(new HttpGet(pathToDoc.toExternalForm()));
                     StatusLine statusLine = response.getStatusLine();
                     Log.d(TAG, "statusLine " + statusLine);
-                    return statusLine;
 
+                    Assert.assertEquals(HttpStatus.SC_NOT_FOUND, statusLine.getStatusCode());
                 } catch (ClientProtocolException e) {
                     Assert.assertNull("Got ClientProtocolException: " + e.getLocalizedMessage(), e);
                 } catch (IOException e) {
@@ -253,17 +256,7 @@ public class Replicator extends CBLiteTestCase {
                 } finally {
                     httpRequestDoneSignal.countDown();
                 }
-
-                return null;
             }
-
-            @Override
-            protected void onPostExecute(Object o) {
-                Log.d(TAG, "onPostExecute called with " + o);
-                StatusLine statusLine = (StatusLine) o;
-                Assert.assertEquals(HttpStatus.SC_NOT_FOUND, statusLine.getStatusCode());
-            }
-
         };
         getDocTask.execute();
 
@@ -290,33 +283,7 @@ public class Replicator extends CBLiteTestCase {
         addDocWithId(doc1Id, "attachment.png");
         addDocWithId(doc2Id, "attachment2.png");
 
-        URL remote = getReplicationURL();
-
-        CountDownLatch replicationDoneSignal = new CountDownLatch(1);
-        final CBLReplicator repl = database.getReplicator(remote, false, false, server.getWorkExecutor());
-        AsyncTask replicationTask = new AsyncTask<Object, Object, Object>() {
-
-            @Override
-            protected Object doInBackground(Object... aParams) {
-                // Push them to the remote:
-                repl.start();
-                Assert.assertTrue(repl.isRunning());
-                return null;
-            }
-
-        };
-        replicationTask.execute();
-
-        ReplicationObserver replicationObserver = new ReplicationObserver(replicationDoneSignal);
-        repl.addObserver(replicationObserver);
-
-        Log.d(TAG, "Waiting for replicator to finish");
-        try {
-            replicationDoneSignal.await();
-            Log.d(TAG, "replicator finished");
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+        doPullReplication();
 
         CBLRevisionInternal doc1 = database.getDocumentWithIDAndRev(doc1Id, null, EnumSet.noneOf(CBLDatabase.TDContentOptions.class));
         Assert.assertNotNull(doc1);
@@ -331,6 +298,82 @@ public class Replicator extends CBLiteTestCase {
         Log.d(TAG, "testPuller() finished");
 
 
+    }
+
+    public void testPullerWithLiveQuery() throws Throwable {
+
+        // This is essentially a regression test for a deadlock
+        // that was happening when the LiveQuery#onDatabaseChanged()
+        // was calling waitForUpdateThread(), but that thread was
+        // waiting on connection to be released by the thread calling
+        // waitForUpdateThread().  When the deadlock bug was present,
+        // this test would trigger the deadlock and never finish.
+
+        Log.d(CBLDatabase.TAG, "testPullerWithLiveQuery");
+        String docIdTimestamp = Long.toString(System.currentTimeMillis());
+        final String doc1Id = String.format("doc1-%s", docIdTimestamp);
+        final String doc2Id = String.format("doc2-%s", docIdTimestamp);
+
+        addDocWithId(doc1Id, "attachment2.png");
+        addDocWithId(doc2Id, "attachment2.png");
+
+        final int numDocsBeforePull = database.getDocumentCount();
+
+        CBLView view = database.getView("testPullerWithLiveQueryView");
+        view.setMapAndReduce(new CBLMapper() {
+            @Override
+            public void map(Map<String, Object> document, CBLEmitter emitter) {
+                if (document.get("_id") != null) {
+                    emitter.emit(document.get("_id"), null);
+                }
+            }
+        }, null, "1");
+
+        CBLLiveQuery allDocsLiveQuery = view.createQuery().toLiveQuery();
+        allDocsLiveQuery.addChangeListener(new CBLLiveQuery.ChangeListener() {
+            @Override
+            public void changed(CBLLiveQuery.ChangeEvent event) {
+                int numTimesCalled = 0;
+                if (event.getError() != null) {
+                    throw new RuntimeException(event.getError());
+                }
+                // the first time this is called back, the rows will be empty.
+                // but on subsequent times we should expect to get a non empty
+                // row set.
+                if (numTimesCalled++ > 0) {
+
+                    Assert.assertTrue(event.getRows().getCount() > numDocsBeforePull);
+                }
+                Log.d(CBLDatabase.TAG, "rows " + event.getRows());
+
+            }
+        });
+
+        allDocsLiveQuery.start();
+
+        doPullReplication();
+
+    }
+
+    private void doPullReplication() {
+        URL remote = getReplicationURL();
+
+        CountDownLatch replicationDoneSignal = new CountDownLatch(1);
+
+        final CBLReplicator repl = database.getReplicator(remote, false, false, manager.getWorkExecutor());
+
+        repl.start();
+
+        ReplicationObserver replicationObserver = new ReplicationObserver(replicationDoneSignal);
+        repl.addObserver(replicationObserver);
+
+        Log.d(TAG, "Waiting for replicator to finish");
+        try {
+            replicationDoneSignal.await();
+            Log.d(TAG, "replicator finished");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
     }
 
     private void addDocWithId(String docId, String attachmentName) throws IOException {
@@ -349,10 +392,10 @@ public class Replicator extends CBLiteTestCase {
         Log.d(TAG, "Send http request to " + pathToDoc1);
 
         final CountDownLatch httpRequestDoneSignal = new CountDownLatch(1);
-        AsyncTask getDocTask = new AsyncTask<Object, Object, Object>() {
+        BackgroundTask getDocTask = new BackgroundTask() {
 
             @Override
-            protected Object doInBackground(Object... aParams) {
+            public void run() {
 
                 org.apache.http.client.HttpClient httpclient = new DefaultHttpClient();
 
@@ -374,7 +417,6 @@ public class Replicator extends CBLiteTestCase {
                 }
 
                 httpRequestDoneSignal.countDown();
-                return null;
             }
 
 
@@ -396,10 +438,10 @@ public class Replicator extends CBLiteTestCase {
         properties.put("source", DEFAULT_TEST_DB);
         properties.put("target", getReplicationURL().toExternalForm());
 
-        CBLReplicator replicator = server.getManager().getReplicator(properties);
+        CBLReplicator replicator = manager.getReplicator(properties);
         Assert.assertNotNull(replicator);
-        Assert.assertEquals(getReplicationURL().toExternalForm(), replicator.getRemote().toExternalForm());
-        Assert.assertTrue(replicator.isPush());
+        Assert.assertEquals(getReplicationURL().toExternalForm(), replicator.getRemoteUrl().toExternalForm());
+        Assert.assertTrue(!replicator.isPull());
         Assert.assertFalse(replicator.isContinuous());
         Assert.assertFalse(replicator.isRunning());
 
@@ -408,7 +450,7 @@ public class Replicator extends CBLiteTestCase {
 
         // now lets lookup existing replicator and stop it
         properties.put("cancel", true);
-        CBLReplicator activeReplicator = server.getManager().getReplicator(properties);
+        CBLReplicator activeReplicator = manager.getReplicator(properties);
         activeReplicator.stop();
         Assert.assertFalse(activeReplicator.isRunning());
 
@@ -418,7 +460,7 @@ public class Replicator extends CBLiteTestCase {
 
         Map<String, Object> properties = getPushReplicationParsedJson();
 
-        CBLReplicator replicator = server.getManager().getReplicator(properties);
+        CBLReplicator replicator = manager.getReplicator(properties);
         Assert.assertNotNull(replicator);
         Assert.assertNotNull(replicator.getAuthorizer());
         Assert.assertTrue(replicator.getAuthorizer() instanceof CBLFacebookAuthorizer);
@@ -433,12 +475,12 @@ public class Replicator extends CBLiteTestCase {
         facebookTokenInfo.put("remote_url", getReplicationURL().toExternalForm());
         facebookTokenInfo.put("access_token", "fake_access_token");
         String destUrl = String.format("/_facebook_token", DEFAULT_TEST_DB);
-        Map<String,Object> result = (Map<String,Object>)sendBody(server, "POST", destUrl, facebookTokenInfo, CBLStatus.OK, null);
+        Map<String,Object> result = (Map<String,Object>)sendBody("POST", destUrl, facebookTokenInfo, CBLStatus.OK, null);
         Log.v(TAG, String.format("result %s", result));
 
         // start a replicator
         Map<String,Object> properties = getPullReplicationParsedJson();
-        CBLReplicator replicator = server.getManager().getReplicator(properties);
+        CBLReplicator replicator = manager.getReplicator(properties);
         replicator.start();
 
         boolean foundError = false;
@@ -449,7 +491,7 @@ public class Replicator extends CBLiteTestCase {
 
             // expect an error since it will try to contact the sync gateway with this bogus login,
             // and the sync gateway will reject it.
-            ArrayList<Object> activeTasks = (ArrayList<Object>)send(server, "GET", "/_active_tasks", CBLStatus.OK, null);
+            ArrayList<Object> activeTasks = (ArrayList<Object>)send("GET", "/_active_tasks", CBLStatus.OK, null);
             Log.d(TAG, "activeTasks: " + activeTasks);
             Map<String,Object> activeTaskReplication = (Map<String,Object>) activeTasks.get(0);
             foundError = (activeTaskReplication.get("error") != null);
@@ -462,6 +504,42 @@ public class Replicator extends CBLiteTestCase {
         Assert.assertTrue(foundError);
 
     }
+
+
+    public void testFetchRemoteCheckpointDoc() throws Exception {
+
+        HttpClientFactory mockHttpClientFactory = new HttpClientFactory() {
+            @Override
+            public HttpClient getHttpClient() {
+                return new MockHttpClient();
+            }
+        };
+
+        Log.d("TEST", "testFetchRemoteCheckpointDoc() called");
+        String dbUrlString = "http://fake.test-url.com:4984/fake/";
+        URL remote = new URL(dbUrlString);
+        database.setLastSequence("1", remote, true);  // otherwise fetchRemoteCheckpoint won't contact remote
+        CBLReplicator replicator = new CBLPusher(database, remote, false, mockHttpClientFactory, manager.getWorkExecutor());
+        replicator.fetchRemoteCheckpointDoc();
+
+        CountDownLatch doneSignal = new CountDownLatch(1);
+        ReplicationObserver replicationObserver = new ReplicationObserver(doneSignal);
+        replicator.addObserver(replicationObserver);
+
+        Log.d(TAG, "testFetchRemoteCheckpointDoc() Waiting for replicator to finish");
+        try {
+            doneSignal.await();
+            Log.d(TAG, "testFetchRemoteCheckpointDoc() replicator finished");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        String errorMessage = "Since we are passing in a mock http client that always throws " +
+                "errors, we expect the replicator to be in an error state";
+        Assert.assertNotNull(errorMessage, replicator.getLastError());
+
+    }
+
 
 
     class ReplicationObserver implements Observer {

@@ -1,5 +1,32 @@
 package com.couchbase.cblite.router;
 
+
+import com.couchbase.cblite.CBLAttachment;
+import com.couchbase.cblite.CBLChangesOptions;
+import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.CBLDatabase.TDContentOptions;
+import com.couchbase.cblite.DocumentChange;
+import com.couchbase.cblite.ReplicationFilter;
+import com.couchbase.cblite.CBLManager;
+import com.couchbase.cblite.CBLMapper;
+import com.couchbase.cblite.CBLMisc;
+import com.couchbase.cblite.CBLQueryOptions;
+import com.couchbase.cblite.CBLQueryRow;
+import com.couchbase.cblite.CBLReducer;
+import com.couchbase.cblite.CBLRevisionList;
+import com.couchbase.cblite.CBLStatus;
+import com.couchbase.cblite.CBLView;
+import com.couchbase.cblite.CBLView.TDViewCollation;
+import com.couchbase.cblite.CBLiteException;
+import com.couchbase.cblite.auth.CBLFacebookAuthorizer;
+import com.couchbase.cblite.auth.CBLPersonaAuthorizer;
+import com.couchbase.cblite.internal.CBLBody;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.replicator.CBLReplicator;
+import com.couchbase.cblite.util.Log;
+
+import org.apache.http.client.HttpResponseException;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,40 +43,11 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Observable;
-import java.util.Observer;
-
-import android.util.Log;
-
-import com.couchbase.cblite.CBLAttachment;
-import com.couchbase.cblite.CBLQueryRow;
-import com.couchbase.cblite.CBLReduceFunction;
-import com.couchbase.cblite.internal.CBLBody;
-import com.couchbase.cblite.CBLChangesOptions;
-import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLFilterBlock;
-import com.couchbase.cblite.CBLMisc;
-import com.couchbase.cblite.CBLQueryOptions;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.CBLRevisionList;
-import com.couchbase.cblite.CBLServer;
-import com.couchbase.cblite.CBLStatus;
-import com.couchbase.cblite.CBLView;
-import com.couchbase.cblite.CBLMapFunction;
-import com.couchbase.cblite.CBLiteException;
-import com.couchbase.cblite.CBLiteVersion;
-import com.couchbase.cblite.CBLDatabase.TDContentOptions;
-import com.couchbase.cblite.CBLView.TDViewCollation;
-import com.couchbase.cblite.auth.CBLFacebookAuthorizer;
-import com.couchbase.cblite.auth.CBLPersonaAuthorizer;
-import com.couchbase.cblite.replicator.CBLReplicator;
-
-import org.apache.http.client.HttpResponseException;
 
 
-public class CBLRouter implements Observer {
+public class CBLRouter implements CBLDatabase.ChangeListener {
 
-    private CBLServer server;
+    private CBLManager manager;
     private CBLDatabase db;
     private CBLURLConnection connection;
     private Map<String,String> queries;
@@ -57,15 +55,15 @@ public class CBLRouter implements Observer {
     private CBLRouterCallbackBlock callbackBlock;
     private boolean responseSent = false;
     private boolean waiting = false;
-    private CBLFilterBlock changesFilter;
+    private ReplicationFilter changesFilter;
     private boolean longpoll = false;
 
     public static String getVersionString() {
-        return CBLiteVersion.CBLiteVersionNumber;
+        return CBLManager.VERSION_STRING;
     }
 
-    public CBLRouter(CBLServer server, CBLURLConnection connection) {
-        this.server = server;
+    public CBLRouter(CBLManager manager, CBLURLConnection connection) {
+        this.manager = manager;
         this.connection = connection;
     }
 
@@ -129,7 +127,7 @@ public class CBLRouter implements Observer {
         }
         Object result = null;
         try {
-            result = CBLServer.getObjectMapper().readValue(value, Object.class);
+            result = CBLManager.getObjectMapper().readValue(value, Object.class);
         } catch (Exception e) {
             Log.w("Unable to parse JSON Query", e);
         }
@@ -146,7 +144,7 @@ public class CBLRouter implements Observer {
     public Map<String,Object> getBodyAsDictionary() {
         try {
             InputStream contentStream = connection.getRequestInputStream();
-            Map<String,Object> bodyMap = CBLServer.getObjectMapper().readValue(contentStream, Map.class);
+            Map<String,Object> bodyMap = CBLManager.getObjectMapper().readValue(contentStream, Map.class);
             return bodyMap;
         } catch (IOException e) {
             Log.w(CBLDatabase.TAG, "WARNING: Exception parsing body into dictionary", e);
@@ -190,14 +188,32 @@ public class CBLRouter implements Observer {
         }
         options.setGroup(getBooleanQuery("group"));
         options.setContentOptions(getContentOptions());
-        options.setStartKey(getJSONQuery("startkey"));
-        options.setEndKey(getJSONQuery("endkey"));
-        Object key = getJSONQuery("key");
-        if(key != null) {
-            List<Object> keys = new ArrayList<Object>();
-            keys.add(key);
+
+
+        List<Object> keys;
+
+        Object keysParam = getJSONQuery("keys");
+        if (keysParam != null && !(keysParam instanceof List)) {
+            return false;
+        }
+        else {
+            keys = ( List<Object>) keysParam;
+        }
+        if (keys == null) {
+            Object key = getJSONQuery("key");
+            if(key != null) {
+                keys = new ArrayList<Object>();
+                keys.add(key);
+            }
+        }
+        if (keys != null) {
             options.setKeys(keys);
         }
+        else {
+            options.setStartKey(getJSONQuery("startkey"));
+            options.setEndKey(getJSONQuery("endkey"));
+        }
+
         return true;
     }
 
@@ -278,16 +294,23 @@ public class CBLRouter implements Observer {
                 message += dbName;  // special root path, like /_all_dbs
             } else {
                 message += "_Database";
-                db = server.getDatabaseNamed(dbName);
-                if(db == null) {
-                    connection.setResponseCode(CBLStatus.BAD_REQUEST);
-                    try {
-                        connection.getResponseOutputStream().close();
-                    } catch (IOException e) {
-                        Log.e(CBLDatabase.TAG, "Error closing empty output stream");
-                    }
-                    sendResponse();
+                if (!CBLManager.isValidDatabaseName(dbName)) {
+                    connection.setResponseCode(CBLStatus.NOT_FOUND);
                     return;
+                }
+                else {
+                    db = manager.getDatabase(dbName);
+                    if(db == null) {
+                        connection.setResponseCode(CBLStatus.BAD_REQUEST);
+                        try {
+                            connection.getResponseOutputStream().close();
+                        } catch (IOException e) {
+                            Log.e(CBLDatabase.TAG, "Error closing empty output stream");
+                        }
+                        sendResponse();
+                        return;
+                    }
+
                 }
             }
         } else {
@@ -392,8 +415,10 @@ public class CBLRouter implements Observer {
         // Send myself a message based on the components:
         CBLStatus status = null;
         try {
-            Method m = this.getClass().getMethod(message, CBLDatabase.class, String.class, String.class);
-            m.invoke(this, db, docID, attachmentName);
+
+            Method m = CBLRouter.class.getMethod(message, CBLDatabase.class, String.class, String.class);
+            status = (CBLStatus)m.invoke(this, db, docID, attachmentName);
+
         } catch (NoSuchMethodException msme) {
             try {
                 String errorMessage = "CBLRouter unable to route request to " + message;
@@ -402,8 +427,8 @@ public class CBLRouter implements Observer {
                 result.put("error", "not_found");
                 result.put("reason", errorMessage);
                 connection.setResponseBody(new CBLBody(result));
-                Method m = this.getClass().getMethod("do_UNKNOWN", CBLDatabase.class, String.class, String.class);
-                status = new CBLStatus(CBLStatus.BAD_REQUEST);
+                Method m = CBLRouter.class.getMethod("do_UNKNOWN", CBLDatabase.class, String.class, String.class);
+                status = (CBLStatus)m.invoke(this, db, docID, attachmentName);
             } catch (Exception e) {
                 //default status is internal server error
                 Log.e(CBLDatabase.TAG, "CBLRouter attempted do_UNKNWON fallback, but that threw an exception", e);
@@ -477,7 +502,7 @@ public class CBLRouter implements Observer {
     public void stop() {
         callbackBlock = null;
         if(db != null) {
-            db.deleteObserver(this);
+            db.removeChangeListener(this);
         }
     }
 
@@ -513,7 +538,7 @@ public class CBLRouter implements Observer {
     }
 
     public CBLStatus do_GET_all_dbs(CBLDatabase _db, String _docID, String _attachmentName) {
-        List<String> dbs = server.allDatabaseNames();
+        List<String> dbs = manager.getAllDatabaseNames();
         connection.setResponseBody(new CBLBody(dbs));
         return new CBLStatus(CBLStatus.OK);
     }
@@ -543,7 +568,7 @@ public class CBLRouter implements Observer {
         }
 
         try {
-            replicator = server.getManager().getReplicator(body);
+            replicator = manager.getReplicator(body);
         } catch (CBLiteException e) {
             Map<String, Object> result = new HashMap<String, Object>();
             result.put("error", e.toString());
@@ -582,19 +607,19 @@ public class CBLRouter implements Observer {
     public CBLStatus do_GET_active_tasks(CBLDatabase _db, String _docID, String _attachmentName) {
         // http://wiki.apache.org/couchdb/HttpGetActiveTasks
         List<Map<String,Object>> activities = new ArrayList<Map<String,Object>>();
-        for (CBLDatabase db : server.allOpenDatabases()) {
+        for (CBLDatabase db : manager.allOpenDatabases()) {
             List<CBLReplicator> activeReplicators = db.getAllReplications();
             if(activeReplicators != null) {
                 for (CBLReplicator replicator : activeReplicators) {
-                    String source = replicator.getRemote().toExternalForm();
+                    String source = replicator.getRemoteUrl().toExternalForm();
                     String target = db.getName();
-                    if(replicator.isPush()) {
+                    if(!replicator.isPull()) {
                         String tmp = source;
                         source = target;
                         target = tmp;
                     }
-                    int processed = replicator.getChangesProcessed();
-                    int total = replicator.getChangesTotal();
+                    int processed = replicator.getCompletedChangesCount();
+                    int total = replicator.getChangesCount();
                     String status = String.format("Processed %d / %d changes", processed, total);
                     int progress = (total > 0) ? Math.round(100 * processed / (float)total) : 0;
                     Map<String,Object> activity = new HashMap<String,Object>();
@@ -605,16 +630,16 @@ public class CBLRouter implements Observer {
                     activity.put("status", status);
                     activity.put("progress", progress);
 
-                    if (replicator.getError() != null) {
+                    if (replicator.getLastError() != null) {
                         String msg = String.format("Replicator error: %s.  Repl: %s.  Source: %s, Target: %s",
-                                replicator.getError(), replicator, source, target);
+                                replicator.getLastError(), replicator, source, target);
                         Log.e(CBLDatabase.TAG, msg);
-                        Throwable error = replicator.getError();
+                        Throwable error = replicator.getLastError();
                         int statusCode = 400;
                         if (error instanceof HttpResponseException) {
                             statusCode = ((HttpResponseException)error).getStatusCode();
                         }
-                        Object[] errorObjects = new Object[]{ statusCode, replicator.getError().toString() };
+                        Object[] errorObjects = new Object[]{ statusCode, replicator.getLastError().toString() };
                         activity.put("error", errorObjects);
                     }
 
@@ -635,7 +660,7 @@ public class CBLRouter implements Observer {
             return status;
         }
         int num_docs = db.getDocumentCount();
-        long update_seq = db.getLastSequence();
+        long update_seq = db.getLastSequenceNumber();
         Map<String, Object> result = new HashMap<String,Object>();
         result.put("db_name", db.getName());
         result.put("db_uuid", db.publicUUID());
@@ -657,11 +682,12 @@ public class CBLRouter implements Observer {
         return new CBLStatus(CBLStatus.CREATED);
     }
 
-    public CBLStatus do_DELETE_Database(CBLDatabase _db, String _docID, String _attachmentName) {
+    public CBLStatus do_DELETE_Database(CBLDatabase _db, String _docID, String _attachmentName) throws CBLiteException {
         if(getQuery("rev") != null) {
             return new CBLStatus(CBLStatus.BAD_REQUEST);  // CouchDB checks for this; probably meant to be a document deletion
         }
-        return server.deleteDatabaseNamed(db.getName()) ? new CBLStatus(CBLStatus.OK) : new CBLStatus(CBLStatus.NOT_FOUND);
+        db.delete();
+        return new CBLStatus(CBLStatus.OK);
     }
 
     /**
@@ -674,6 +700,7 @@ public class CBLRouter implements Observer {
         for (CBLQueryRow row : rows) {
             rowsAsMaps.add(row.asJSONDictionary());
         }
+        allDocsResult.put("rows", rowsAsMaps);
     }
 
     public CBLStatus do_POST_Database(CBLDatabase _db, String _docID, String _attachmentName) {
@@ -710,13 +737,8 @@ public class CBLRouter implements Observer {
         }
 
         Map<String, Object> result = null;
-        if (body.containsKey("keys") && body.get("keys") instanceof ArrayList) {
-            ArrayList<String> keys = (ArrayList<String>) body.get("keys");
-            result = db.getDocsWithIDs(keys, options);
-        } else {
-            result = db.getAllDocs(options);
-            convertCBLQueryRowsToMaps(result);
-        }
+        result = db.getAllDocs(options);
+        convertCBLQueryRowsToMaps(result);
 
         if (result == null) {
             return new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
@@ -1023,7 +1045,7 @@ public class CBLRouter implements Observer {
     public void sendContinuousChange(CBLRevisionInternal rev) {
         Map<String,Object> changeDict = changesDictForRevision(rev);
         try {
-            String jsonString = CBLServer.getObjectMapper().writeValueAsString(changeDict);
+            String jsonString = CBLManager.getObjectMapper().writeValueAsString(changeDict);
             if(callbackBlock != null) {
                 byte[] json = (jsonString + "\n").getBytes();
                 OutputStream os = connection.getResponseOutputStream();
@@ -1040,14 +1062,14 @@ public class CBLRouter implements Observer {
     }
 
     @Override
-    public void update(Observable observable, Object changeObject) {
-        if(observable == db) {
-            //make sure we're listening to the right events
-            Map<String,Object> changeNotification = (Map<String,Object>)changeObject;
+    public void changed(CBLDatabase.ChangeEvent event) {
 
-            CBLRevisionInternal rev = (CBLRevisionInternal)changeNotification.get("rev");
+        List<DocumentChange> changes = event.getChanges();
+        for (DocumentChange change : changes) {
 
-            if(changesFilter != null && !changesFilter.filter(rev)) {
+            CBLRevisionInternal rev = change.getRevisionInternal();
+
+            if(changesFilter != null && !changesFilter.filter(rev, null)) {
                 return;
             }
 
@@ -1060,7 +1082,7 @@ public class CBLRouter implements Observer {
                 if(callbackBlock != null) {
                     byte[] data = null;
                     try {
-                        data = CBLServer.getObjectMapper().writeValueAsBytes(body);
+                        data = CBLManager.getObjectMapper().writeValueAsBytes(body);
                     } catch (Exception e) {
                         Log.w(CBLDatabase.TAG, "Error serializing JSON", e);
                     }
@@ -1123,7 +1145,7 @@ public class CBLRouter implements Observer {
                     sendContinuousChange(rev);
                 }
             }
-            db.addObserver(this);
+            db.addChangeListener(this);
          // Don't close connection; more data to come
             return new CBLStatus(0);
         } else {
@@ -1168,7 +1190,7 @@ public class CBLRouter implements Observer {
                 String revID = getQuery("rev");  // often null
                 CBLRevisionInternal rev = null;
                 if(isLocalDoc) {
-                    rev = db.getDbInternal().getLocalDocument(docID, revID);
+                    rev = db.getLocalDocument(docID, revID);
                 } else {
                     rev = db.getDocumentWithIDAndRev(docID, revID, options);
                     // Handle ?atts_since query by stubbing out older attachments:
@@ -1267,7 +1289,7 @@ public class CBLRouter implements Observer {
             }
 
             String type = null;
-            String acceptEncoding = connection.getRequestProperty("Accept-Encoding");
+            String acceptEncoding = connection.getRequestProperty("accept-encoding");
             CBLAttachment contents = db.getAttachmentForSequence(rev.getSequence(), _attachmentName);
 
             if (contents == null) {
@@ -1277,11 +1299,11 @@ public class CBLRouter implements Observer {
             if (type != null) {
                 connection.getResHeader().add("Content-Type", type);
             }
-            if (acceptEncoding != null && acceptEncoding.equals("gzip")) {
-                connection.getResHeader().add("Content-Encoding", acceptEncoding);
+            if (acceptEncoding != null && acceptEncoding.contains("gzip") && contents.getGZipped()) {
+                connection.getResHeader().add("Content-Encoding", "gzip");
             }
 
-            connection.setResponseInputStream(contents.getBody());
+            connection.setResponseInputStream(contents.getContent());
             return new CBLStatus(CBLStatus.OK);
 
         } catch (CBLiteException e) {
@@ -1336,7 +1358,12 @@ public class CBLRouter implements Observer {
             } else {
                 result = _db.putRevision(rev, prevRevID, allowConflict);
             }
-            outStatus.setCode(CBLStatus.CREATED);
+            if(deleting){
+                outStatus.setCode(CBLStatus.OK);
+            } else{
+                outStatus.setCode(CBLStatus.CREATED);
+            }
+
         } catch (CBLiteException e) {
             e.printStackTrace();
             Log.e(CBLDatabase.TAG, e.toString());
@@ -1374,7 +1401,7 @@ public class CBLRouter implements Observer {
         return status;
     }
 
-    public void do_PUT_Document(CBLDatabase _db, String docID, String _attachmentName) throws CBLiteException {
+    public CBLStatus do_PUT_Document(CBLDatabase _db, String docID, String _attachmentName) throws CBLiteException {
         Map<String,Object> bodyDict = getBodyAsDictionary();
         if(bodyDict == null) {
             throw new CBLiteException(CBLStatus.BAD_REQUEST);
@@ -1393,6 +1420,7 @@ public class CBLRouter implements Observer {
             List<String> history = CBLDatabase.parseCouchDBRevisionHistory(body.getProperties());
             db.forceInsert(rev, history, null);
         }
+        return new CBLStatus(CBLStatus.CREATED);
     }
 
     public CBLStatus do_DELETE_Document(CBLDatabase _db, String docID, String _attachmentName) {
@@ -1400,13 +1428,12 @@ public class CBLRouter implements Observer {
     }
 
     public void updateAttachment(String attachment, String docID, InputStream contentStream) throws CBLiteException {
-        CBLStatus status = new CBLStatus();
         String revID = getQuery("rev");
         if(revID == null) {
             revID = getRevIDFromIfMatchHeader();
         }
         CBLRevisionInternal rev = db.updateAttachment(attachment, contentStream, connection.getRequestProperty("content-type"),
-                docID, revID, status);
+                docID, revID);
         Map<String, Object> resultDict = new HashMap<String, Object>();
         resultDict.put("ok", true);
         resultDict.put("id", rev.getDocId());
@@ -1437,15 +1464,15 @@ public class CBLRouter implements Observer {
         if(mapSource == null) {
             return null;
         }
-        CBLMapFunction mapBlock = CBLView.getCompiler().compileMapFunction(mapSource, language);
+        CBLMapper mapBlock = CBLView.getCompiler().compileMap(mapSource, language);
         if(mapBlock == null) {
             Log.w(CBLDatabase.TAG, String.format("View %s has unknown map function: %s", viewName, mapSource));
             return null;
         }
         String reduceSource = (String)viewProps.get("reduce");
-        CBLReduceFunction reduceBlock = null;
+        CBLReducer reduceBlock = null;
         if(reduceSource != null) {
-            reduceBlock = CBLView.getCompiler().compileReduceFunction(reduceSource, language);
+            reduceBlock = CBLView.getCompiler().compileReduce(reduceSource, language);
             if(reduceBlock == null) {
                 Log.w(CBLDatabase.TAG, String.format("View %s has unknown reduce function: %s", viewName, reduceBlock));
                 return null;
@@ -1497,16 +1524,13 @@ public class CBLRouter implements Observer {
             options.setKeys(keys);
         }
 
-        CBLStatus status = view.updateIndex();
-        if(!status.isSuccessful()) {
-            return status;
-        }
+        view.updateIndex();
 
         long lastSequenceIndexed = view.getLastSequenceIndexed();
 
         // Check for conditional GET and set response Etag header:
         if(keys == null) {
-            long eTag = options.isIncludeDocs() ? db.getLastSequence() : lastSequenceIndexed;
+            long eTag = options.isIncludeDocs() ? db.getLastSequenceNumber() : lastSequenceIndexed;
             if(cacheWithEtag(String.format("%d", eTag))) {
                 return new CBLStatus(CBLStatus.NOT_MODIFIED);
             }

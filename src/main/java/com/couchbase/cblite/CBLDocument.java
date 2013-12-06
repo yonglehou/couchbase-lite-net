@@ -1,9 +1,8 @@
 package com.couchbase.cblite;
 
-
-import android.util.Log;
-
 import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.internal.InterfaceAudience;
+import com.couchbase.cblite.util.Log;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +29,7 @@ public class CBLDocument {
     /**
      * The current/latest revision. This object is cached.
      */
-    private CBLRevision currentRevision;
+    private CBLSavedRevision currentRevision;
 
     /**
      * Application-defined model object representing this document
@@ -38,11 +37,17 @@ public class CBLDocument {
     private Object model;
 
     /**
+     * Change Listeners
+     */
+    private List<ChangeListener> changeListeners = new ArrayList<ChangeListener>();
+
+    /**
      * Constructor
      *
      * @param database   The document's owning database
      * @param documentId The document's ID
      */
+    @InterfaceAudience.Private
     public CBLDocument(CBLDatabase database, String documentId) {
         this.database = database;
         this.documentId = documentId;
@@ -51,6 +56,7 @@ public class CBLDocument {
     /**
      * Get the document's owning database.
      */
+    @InterfaceAudience.Public
     public CBLDatabase getDatabase() {
         return database;
     }
@@ -58,8 +64,246 @@ public class CBLDocument {
     /**
      * Get the document's ID
      */
+    @InterfaceAudience.Public
     public String getId() {
         return documentId;
+    }
+
+    /**
+     * Is this document deleted? (That is, does its current revision have the '_deleted' property?)
+     * @return boolean to indicate whether deleted or not
+     */
+    @InterfaceAudience.Public
+    public boolean isDeleted() {
+        return getCurrentRevision().isDeletion();
+    }
+
+    /**
+     * Get the ID of the current revision
+     */
+    @InterfaceAudience.Public
+    public String getCurrentRevisionId() {
+        return getCurrentRevision().getId();
+    }
+
+    /**
+     * Get the current revision
+     */
+    @InterfaceAudience.Public
+    public CBLSavedRevision getCurrentRevision() {
+        if (currentRevision == null) {
+            currentRevision = getRevisionWithId(null);
+        }
+        return currentRevision;
+    }
+
+    /**
+     * Returns the document's history as an array of CBLRevisions. (See CBLSavedRevision's method.)
+     *
+     * @return document's history
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public List<CBLSavedRevision> getRevisionHistory() throws CBLiteException {
+        if (getCurrentRevision() == null) {
+            Log.w(CBLDatabase.TAG, "getRevisionHistory() called but no currentRevision");
+            return null;
+        }
+        return getCurrentRevision().getRevisionHistory();
+    }
+
+    /**
+     * Returns all the current conflicting revisions of the document. If the document is not
+     * in conflict, only the single current revision will be returned.
+     *
+     * @return all current conflicting revisions of the document
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public List<CBLSavedRevision> getConflictingRevisions() throws CBLiteException {
+        return getLeafRevisions(false);
+    }
+
+    /**
+     * Returns all the leaf revisions in the document's revision tree,
+     * including deleted revisions (i.e. previously-resolved conflicts.)
+     *
+     * @return all the leaf revisions in the document's revision tree
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public List<CBLSavedRevision> getLeafRevisions() throws CBLiteException {
+        return getLeafRevisions(true);
+    }
+
+    /**
+     * The contents of the current revision of the document.
+     * This is shorthand for self.currentRevision.properties.
+     * Any keys in the dictionary that begin with "_", such as "_id" and "_rev", contain CouchbaseLite metadata.
+     *
+     * @return contents of the current revision of the document.
+     */
+    @InterfaceAudience.Public
+    public Map<String,Object> getProperties() {
+        return getCurrentRevision().getProperties();
+    }
+
+    /**
+     * The user-defined properties, without the ones reserved by CouchDB.
+     * This is based on -properties, with every key whose name starts with "_" removed.
+     *
+     * @return user-defined properties, without the ones reserved by CouchDB.
+     */
+    @InterfaceAudience.Public
+    public Map<String,Object> getUserProperties() {
+        return getCurrentRevision().getUserProperties();
+    }
+
+    /**
+     * Deletes this document by adding a deletion revision.
+     * This will be replicated to other databases.
+     *
+     * @return boolean to indicate whether deleted or not
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public boolean delete() throws CBLiteException {
+        return getCurrentRevision().deleteDocument() != null;
+    }
+
+
+    /**
+     * Purges this document from the database; this is more than deletion, it forgets entirely about it.
+     * The purge will NOT be replicated to other databases.
+     *
+     * @return boolean to indicate whether purged or not
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public boolean purge() throws CBLiteException {
+        Map<String, List<String>> docsToRevs = new HashMap<String, List<String>>();
+        List<String> revs = new ArrayList<String>();
+        revs.add("*");
+        docsToRevs.put(documentId, revs);
+        database.purgeRevisions(docsToRevs);
+        database.removeDocumentFromCache(this);
+        return true;
+    }
+
+    /**
+     * The revision with the specified ID.
+     *
+     *
+     * @param id the revision ID
+     * @return the CBLSavedRevision object
+     */
+    @InterfaceAudience.Public
+    public CBLSavedRevision getRevision(String id) {
+        if (id.equals(currentRevision.getId())) {
+            return currentRevision;
+        }
+        EnumSet<CBLDatabase.TDContentOptions> contentOptions = EnumSet.noneOf(CBLDatabase.TDContentOptions.class);
+        CBLRevisionInternal revisionInternal = database.getDocumentWithIDAndRev(getId(), id, contentOptions);
+        CBLSavedRevision revision = null;
+        revision = getRevisionFromRev(revisionInternal);
+        return revision;
+    }
+
+    /**
+     * Creates an unsaved new revision whose parent is the currentRevision,
+     * or which will be the first revision if the document doesn't exist yet.
+     * You can modify this revision's properties and attachments, then save it.
+     * No change is made to the database until/unless you save the new revision.
+     *
+     * @return the newly created revision
+     */
+    @InterfaceAudience.Public
+    public CBLUnsavedRevision createRevision() {
+        return new CBLUnsavedRevision(this, getCurrentRevision());
+    }
+
+    /**
+     * Shorthand for getProperties().get(key)
+     */
+    @InterfaceAudience.Public
+    public Object getProperty(String key) {
+        return getCurrentRevision().getProperties().get(key);
+    }
+
+    /**
+     * Saves a new revision. The properties dictionary must have a "_rev" property
+     * whose ID matches the current revision's (as it will if it's a modified
+     * copy of this document's .properties property.)
+     *
+     * @param properties the contents to be saved in the new revision
+     * @return a new CBLSavedRevision
+     */
+    @InterfaceAudience.Public
+    public CBLSavedRevision putProperties(Map<String,Object> properties) throws CBLiteException {
+        String prevID = (String) properties.get("_rev");
+        return putProperties(properties, prevID);
+    }
+
+    /**
+     * Saves a new revision by letting the caller update the existing properties.
+     * This method handles conflicts by retrying (calling the block again).
+     * The DocumentUpdater implementation should modify the properties of the new revision and return YES to save or
+     * NO to cancel. Be careful: the DocumentUpdater can be called multiple times if there is a conflict!
+     *
+     * @param updater the callback DocumentUpdater implementation.  Will be called on each
+     *                attempt to save. Should update the given revision's properties and then
+     *                return YES, or just return NO to cancel.
+     * @return The new saved revision, or null on error or cancellation.
+     * @throws CBLiteException
+     */
+    @InterfaceAudience.Public
+    public CBLSavedRevision update(DocumentUpdater updater) throws CBLiteException {
+
+        int lastErrorCode = CBLStatus.UNKNOWN;
+        do {
+            CBLUnsavedRevision newRev = createRevision();
+            if (updater.update(newRev) == false) {
+                break;
+            }
+            try {
+                CBLSavedRevision savedRev = newRev.save();
+                if (savedRev != null) {
+                    return savedRev;
+                }
+            } catch (CBLiteException e) {
+                lastErrorCode = e.getCBLStatus().getCode();
+            }
+
+        } while (lastErrorCode == CBLStatus.CONFLICT);
+        return null;
+
+    }
+
+
+    @InterfaceAudience.Public
+    public void addChangeListener(ChangeListener changeListener) {
+        changeListeners.add(changeListener);
+    }
+
+    @InterfaceAudience.Public
+    public void removeChangeListener(ChangeListener changeListener) {
+        changeListeners.remove(changeListener);
+    }
+
+    /**
+     * Gets a reference to an optional application-defined model object representing this Document.
+     */
+    @InterfaceAudience.Public
+    public Object getModel() {
+        return model;
+    }
+
+    /**
+     * Sets a reference to an optional application-defined model object representing this Document.
+     */
+    @InterfaceAudience.Public
+    public void setModel(Object model) {
+        this.model = model;
     }
 
     /**
@@ -75,116 +319,10 @@ public class CBLDocument {
         return documentId;
     }
 
-    /**
-     * Is this document deleted? (That is, does its current revision have the '_deleted' property?)
-     * @return boolean to indicate whether deleted or not
-     */
-    public boolean isDeleted() {
-        return currentRevision.isDeleted();
-    }
 
-    /**
-     * Deletes this document by adding a deletion revision.
-     * This will be replicated to other databases.
-     *
-     * @return boolean to indicate whether deleted or not
-     * @throws CBLiteException
-     */
-    public boolean delete() throws CBLiteException {
-        return currentRevision.deleteDocument() != null;
-    }
+    List<CBLSavedRevision> getLeafRevisions(boolean includeDeleted) throws CBLiteException {
 
-    /**
-     * Purges this document from the database; this is more than deletion, it forgets entirely about it.
-     * The purge will NOT be replicated to other databases.
-     *
-     * @return boolean to indicate whether purged or not
-     * @throws CBLiteException
-     */
-    public boolean purge() throws CBLiteException {
-        Map<String, List<String>> docsToRevs = new HashMap<String, List<String>>();
-        List<String> revs = new ArrayList<String>();
-        revs.add("*");
-        docsToRevs.put(documentId, revs);
-        database.purgeRevisions(docsToRevs);
-        database.removeDocumentFromCache(this);
-        return true;
-    }
-
-    /**
-     * The revision with the specified ID.
-     *
-     * @param revisionID the revision ID
-     * @return the CBLRevision object
-     */
-    public CBLRevision getRevision(String revisionID) {
-        if (revisionID.equals(currentRevision.getId())) {
-            return currentRevision;
-        }
-        EnumSet<CBLDatabase.TDContentOptions> contentOptions = EnumSet.noneOf(CBLDatabase.TDContentOptions.class);
-        CBLRevisionInternal revisionInternal = database.getDocumentWithIDAndRev(getId(), revisionID, contentOptions);
-        CBLRevision revision = null;
-        revision = getRevisionFromRev(revisionInternal);
-        return revision;
-    }
-
-    /**
-     * Get the current revision
-     *
-     * @return
-     */
-    public CBLRevision getCurrentRevision() {
-        return currentRevision;
-    }
-
-    /**
-     * Get the ID of the current revision
-     *
-     * @return
-     */
-    public String getCurrentRevisionId() {
-        return currentRevision.getId();
-    }
-
-    /**
-     * Returns the document's history as an array of CBLRevisions. (See CBLRevision's method.)
-     *
-     * @return document's history
-     * @throws CBLiteException
-     */
-    public List<CBLRevision> getRevisionHistory() throws CBLiteException {
-        if (currentRevision == null) {
-            Log.w(CBLDatabase.TAG, "getRevisionHistory() called but no currentRevision");
-            return null;
-        }
-        return currentRevision.getRevisionHistory();
-    }
-
-    /**
-     * Returns all the current conflicting revisions of the document. If the document is not
-     * in conflict, only the single current revision will be returned.
-     *
-     * @return all current conflicting revisions of the document
-     * @throws CBLiteException
-     */
-    public List<CBLRevision> getConflictingRevisions() throws CBLiteException {
-        return getLeafRevisions(false);
-    }
-
-    /**
-     * Returns all the leaf revisions in the document's revision tree,
-     * including deleted revisions (i.e. previously-resolved conflicts.)
-     *
-     * @return all the leaf revisions in the document's revision tree
-     * @throws CBLiteException
-     */
-    public List<CBLRevision> getLeafRevisions() throws CBLiteException {
-        return getLeafRevisions(true);
-    }
-
-    List<CBLRevision> getLeafRevisions(boolean includeDeleted) throws CBLiteException {
-
-        List<CBLRevision> result = new ArrayList<CBLRevision>();
+        List<CBLSavedRevision> result = new ArrayList<CBLSavedRevision>();
         CBLRevisionList revs = database.getAllRevisionsOfDocumentID(documentId, true);
         for (CBLRevisionInternal rev : revs) {
             // add it to result, unless we are not supposed to include deleted and it's deleted
@@ -198,74 +336,33 @@ public class CBLDocument {
         return Collections.unmodifiableList(result);
     }
 
-    /**
-     * Creates an unsaved new revision whose parent is the currentRevision,
-     * or which will be the first revision if the document doesn't exist yet.
-     * You can modify this revision's properties and attachments, then save it.
-     * No change is made to the database until/unless you save the new revision.
-     *
-     * @return the newly created revision
-     */
-    public CBLNewRevision newRevision() {
-        return new CBLNewRevision(this, currentRevision);
-    }
 
-    /**
-     * Shorthand for getProperties().get(key)
-     */
-    public Object propertyForKey(String key) {
-        return currentRevision.getProperties().get(key);
-    }
 
-    /**
-     * The contents of the current revision of the document.
-     * This is shorthand for self.currentRevision.properties.
-     * Any keys in the dictionary that begin with "_", such as "_id" and "_rev", contain CouchbaseLite metadata.
-     *
-     * @return contents of the current revision of the document.
-     */
-    public Map<String,Object> getProperties() {
-        return currentRevision.getProperties();
-    }
+    CBLSavedRevision putProperties(Map<String,Object> properties, String prevID) throws CBLiteException {
+        String newId = null;
+        if (properties != null && properties.containsKey("_id")) {
+            newId = (String) properties.get("_id");
+        }
 
-    /**
-     * The user-defined properties, without the ones reserved by CouchDB.
-     * This is based on -properties, with every key whose name starts with "_" removed.
-     *
-     * @return user-defined properties, without the ones reserved by CouchDB.
-     */
-    public Map<String,Object> getUserProperties() {
-        return currentRevision.getUserProperties();
-    }
-
-    /**
-     * Saves a new revision. The properties dictionary must have a "_rev" property
-     * whose ID matches the current revision's (as it will if it's a modified
-     * copy of this document's .properties property.)
-     *
-     * @param properties the contents to be saved in the new revision
-     * @return a new CBLRevision
-     */
-    public CBLRevision putProperties(Map<String,Object> properties) throws CBLiteException {
-        String prevID = (String) properties.get("_rev");
-        return putProperties(properties, prevID);
-    }
-
-    CBLRevision putProperties(Map<String,Object> properties, String prevID) throws CBLiteException {
-
-        String newId = (String) properties.get("_id");
         if (newId != null && !newId.equalsIgnoreCase(getId())) {
             Log.w(CBLDatabase.TAG, String.format("Trying to put wrong _id to this: %s properties: %s", this, properties));
         }
 
         // Process _attachments dict, converting CBLAttachments to dicts:
-        Map<String, Object> attachments = (Map<String, Object>) properties.get("_attachments");
+        Map<String, Object> attachments = null;
+        if (properties != null && properties.containsKey("__attachments")) {
+            attachments = (Map<String, Object>) properties.get("_attachments");
+        }
         if (attachments != null && attachments.size() > 0) {
             Map<String, Object> updatedAttachments = CBLAttachment.installAttachmentBodies(attachments, database);
             properties.put("_attachments", updatedAttachments);
         }
 
-        boolean deleted = (properties == null) || ((Boolean)properties.get("_deleted")).booleanValue();
+        boolean hasTrueDeletedProperty = false;
+        if (properties != null) {
+            hasTrueDeletedProperty = properties.get("_deleted") != null && ((Boolean)properties.get("_deleted")).booleanValue();
+        }
+        boolean deleted = (properties == null) || hasTrueDeletedProperty;
         CBLRevisionInternal rev = new CBLRevisionInternal(documentId, null, deleted, database);
         if (properties != null) {
             rev.setProperties(properties);
@@ -274,67 +371,38 @@ public class CBLDocument {
         if (newRev == null) {
             return null;
         }
-        return new CBLRevision(this, newRev);
+        return new CBLSavedRevision(this, newRev);
 
     }
 
-    /**
-     * Saves a new revision by letting the caller update the existing properties.
-     * This method handles conflicts by retrying (calling the block again).
-     * The CBLRevisionUpdater implementation should modify the properties of the new revision and return YES to save or
-     * NO to cancel. Be careful: the CBLRevisionUpdater can be called multiple times if there is a conflict!
-     *
-     * @param updater the callback CBLRevisionUpdater implementation.  Will be called on each
-     *                attempt to save. Should update the given revision's properties and then
-     *                return YES, or just return NO to cancel.
-     * @return The new saved revision, or null on error or cancellation.
-     * @throws CBLiteException
-     */
-    public CBLRevision update(CBLRevisionUpdater updater) throws CBLiteException {
 
-        int lastErrorCode = CBLStatus.UNKNOWN;
-        do {
-            CBLNewRevision newRev = newRevision();
-            if (updater.updateRevision(newRev) == false) {
-                break;
-            }
-            try {
-                CBLRevision savedRev = newRev.save();
-                if (savedRev != null) {
-                    return savedRev;
-                }
-            } catch (CBLiteException e) {
-                lastErrorCode = e.getCBLStatus().getCode();
-            }
-
-        } while (lastErrorCode == CBLStatus.CONFLICT);
-        return null;
-
-    }
-
-    CBLRevision getRevisionFromRev(CBLRevisionInternal internalRevision) {
+    CBLSavedRevision getRevisionFromRev(CBLRevisionInternal internalRevision) {
         if (internalRevision == null) {
             return null;
         }
-        else if (internalRevision.getRevId().equals(currentRevision.getId())) {
+        else if (currentRevision != null && internalRevision.getRevId().equals(currentRevision.getId())) {
             return currentRevision;
         }
         else {
-            return new CBLRevision(this, internalRevision);
+            return new CBLSavedRevision(this, internalRevision);
         }
 
     }
 
-    public Object getModel() {
-        return model;
+    CBLSavedRevision getRevisionWithId(String revId) {
+        if (revId != null && currentRevision != null && revId.equals(currentRevision.getId())) {
+            return currentRevision;
+        }
+        return getRevisionFromRev(
+                database.getDocumentWithIDAndRev(getId(),
+                revId,
+                EnumSet.noneOf(CBLDatabase.TDContentOptions.class))
+        );
     }
 
-    public void setModel(Object model) {
-        this.model = model;
-    }
 
-    public static interface CBLRevisionUpdater {
-        public boolean updateRevision(CBLNewRevision newRevision);
+    public static interface DocumentUpdater {
+        public boolean update(CBLUnsavedRevision newRevision);
     }
 
     void loadCurrentRevisionFrom(CBLQueryRow row) {
@@ -342,15 +410,54 @@ public class CBLDocument {
             return;
         }
         String revId = row.getDocumentRevisionId();
-        boolean rowRevisionIsGreater = (CBLRevisionInternal.CBLCompareRevIDs(revId, currentRevision.getId()) > 0);
-        if (currentRevision == null || rowRevisionIsGreater) {
+        if (currentRevision == null || revIdGreaterThanCurrent(revId)) {
             Map<String, Object> properties = row.getDocumentProperties();
             if (properties != null) {
-                CBLRevisionInternal rev = new CBLRevisionInternal(properties);
-                currentRevision = new CBLRevision(this, rev);
+                CBLRevisionInternal rev = new CBLRevisionInternal(properties, row.getDatabase());
+                currentRevision = new CBLSavedRevision(this, rev);
             }
         }
      }
 
+    private boolean revIdGreaterThanCurrent(String revId) {
+        return (CBLRevisionInternal.CBLCompareRevIDs(revId, currentRevision.getId()) > 0);
+    }
+
+    void revisionAdded(Map<String,Object> changeNotification) {
+
+        // TODO: the reason this is greyed out is that this should be called from Database.notifyChange()
+
+        CBLRevisionInternal rev = (CBLRevisionInternal) changeNotification.get("rev");
+        if (currentRevision != null && !rev.getRevId().equals(currentRevision.getId())) {
+            currentRevision = new CBLSavedRevision(this, rev);
+        }
+        DocumentChange change = DocumentChange.tempFactory(rev, null);
+        for (ChangeListener listener : changeListeners) {
+            listener.changed(new ChangeEvent(this, change));
+        }
+
+    }
+
+    public static class ChangeEvent {
+        private CBLDocument source;
+        private DocumentChange change;
+
+        public ChangeEvent(CBLDocument source, DocumentChange documentChange) {
+            this.source = source;
+            this.change = documentChange;
+        }
+
+        public CBLDocument getSource() {
+            return source;
+        }
+
+        public DocumentChange getChange() {
+            return change;
+        }
+    }
+
+    public static interface ChangeListener {
+        public void changed(ChangeEvent event);
+    }
 
 }

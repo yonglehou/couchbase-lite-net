@@ -1,5 +1,28 @@
 package com.couchbase.cblite.replicator;
 
+import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.CBLManager;
+import com.couchbase.cblite.CBLMisc;
+import com.couchbase.cblite.CBLRevisionList;
+import com.couchbase.cblite.CBLStatus;
+import com.couchbase.cblite.CBLiteException;
+import com.couchbase.cblite.internal.CBLBody;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.internal.InterfaceAudience;
+import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker;
+import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker.TDChangeTrackerMode;
+import com.couchbase.cblite.replicator.changetracker.CBLChangeTrackerClient;
+import com.couchbase.cblite.storage.SQLException;
+import com.couchbase.cblite.support.CBLBatchProcessor;
+import com.couchbase.cblite.support.CBLBatcher;
+import com.couchbase.cblite.support.CBLRemoteRequestCompletionBlock;
+import com.couchbase.cblite.support.CBLSequenceMap;
+import com.couchbase.cblite.support.HttpClientFactory;
+import com.couchbase.cblite.util.Log;
+
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.HttpResponseException;
+
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
@@ -9,29 +32,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.HttpResponseException;
 
-import android.database.SQLException;
-import android.util.Log;
-
-import com.couchbase.cblite.internal.CBLBody;
-import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLMisc;
-import com.couchbase.cblite.CBLiteException;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.CBLRevisionList;
-import com.couchbase.cblite.CBLServer;
-import com.couchbase.cblite.CBLStatus;
-import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker;
-import com.couchbase.cblite.replicator.changetracker.CBLChangeTrackerClient;
-import com.couchbase.cblite.replicator.changetracker.CBLChangeTracker.TDChangeTrackerMode;
-import com.couchbase.cblite.support.HttpClientFactory;
-import com.couchbase.cblite.support.CBLBatchProcessor;
-import com.couchbase.cblite.support.CBLBatcher;
-import com.couchbase.cblite.support.CBLRemoteRequestCompletionBlock;
-import com.couchbase.cblite.support.CBLSequenceMap;
-
+@InterfaceAudience.Private
 public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
 
     private static final int MAX_OPEN_HTTP_CONNECTIONS = 16;
@@ -42,13 +44,37 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
     protected CBLSequenceMap pendingSequences;
     protected volatile int httpConnectionCount;
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     public CBLPuller(CBLDatabase db, URL remote, boolean continuous, ScheduledExecutorService workExecutor) {
         this(db, remote, continuous, null, workExecutor);
     }
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     public CBLPuller(CBLDatabase db, URL remote, boolean continuous, HttpClientFactory clientFactory, ScheduledExecutorService workExecutor) {
         super(db, remote, continuous, clientFactory, workExecutor);
     }
+
+    @Override
+    @InterfaceAudience.Public
+    public boolean isPull() {
+        return true;
+    }
+
+    @Override
+    @InterfaceAudience.Public
+    public boolean shouldCreateTarget() {
+        return false;
+    }
+
+    @Override
+    @InterfaceAudience.Public
+    public void setCreateTarget(boolean createTarget) { }
 
     @Override
     public void beginReplicating() {
@@ -133,7 +159,7 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
             rev.setRemoteSequenceID(lastSequence);
             addToInbox(rev);
         }
-        setChangesTotal(getChangesTotal() + changes.size());
+        setChangesCount(getChangesCount() + changes.size());
         while(revsToPull != null && revsToPull.size() > 1000) {
             try {
                 Thread.sleep(500);  // <-- TODO: why is this here?
@@ -147,8 +173,8 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
     public void changeTrackerStopped(CBLChangeTracker tracker) {
         Log.w(CBLDatabase.TAG, this + ": ChangeTracker stopped");
         //FIXME tracker doesnt have error right now
-//        if(error == null && tracker.getError() != null) {
-//            error = tracker.getError();
+//        if(error == null && tracker.getLastError() != null) {
+//            error = tracker.getLastError();
 //        }
         changeTracker = null;
         if(batcher != null) {
@@ -160,7 +186,7 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
 
     @Override
     public HttpClient getHttpClient() {
-    	HttpClient httpClient = this.clientFacotry.getHttpClient();
+    	HttpClient httpClient = this.clientFactory.getHttpClient();
 
         return httpClient;
     }
@@ -173,7 +199,7 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
         // Ask the local database which of the revs are not known to it:
         //Log.w(CBLDatabase.TAG, String.format("%s: Looking up %s", this, inbox));
         String lastInboxSequence = ((TDPulledRevision)inbox.get(inbox.size()-1)).getRemoteSequenceID();
-        int total = getChangesTotal() - inbox.size();
+        int total = getChangesCount() - inbox.size();
         if(!db.findMissingRevisions(inbox)) {
             Log.w(CBLDatabase.TAG, String.format("%s failed to look up local revs", this));
             inbox = null;
@@ -183,8 +209,8 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
         if(inbox != null) {
             inboxCount = inbox.size();
         }
-        if(getChangesTotal() != total + inboxCount) {
-            setChangesTotal(total + inboxCount);
+        if(getChangesCount() != total + inboxCount) {
+            setChangesCount(total + inboxCount);
         }
 
         if(inboxCount == 0) {
@@ -283,14 +309,14 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
                         asyncTaskStarted();
                     } else {
                         Log.w(CBLDatabase.TAG, this + ": Missing revision history in response from " + pathInside);
-                        setChangesProcessed(getChangesProcessed() + 1);
+                        setCompletedChangesCount(getCompletedChangesCount() + 1);
                     }
                 } else {
                     if(e != null) {
                         Log.e(CBLDatabase.TAG, "Error pulling remote revision", e);
                         error = e;
                     }
-                    setChangesProcessed(getChangesProcessed() + 1);
+                    setCompletedChangesCount(getCompletedChangesCount() + 1);
                 }
 
                 // Note that we've finished this task; then start another one if there
@@ -310,8 +336,16 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
         Log.i(CBLDatabase.TAG, this + " inserting " + revs.size() + " revisions...");
         //Log.v(CBLDatabase.TAG, String.format("%s inserting %s", this, revs));
 
-        /* Updating self.lastSequence is tricky. It needs to be the received sequence ID of the revision for which we've successfully received and inserted (or rejected) it and all previous received revisions. That way, next time we can start tracking remote changes from that sequence ID and know we haven't missed anything. */
-        /* FIX: The current code below doesn't quite achieve that: it tracks the latest sequence ID we've successfully processed, but doesn't handle failures correctly across multiple calls to -insertRevisions. I think correct behavior will require keeping an NSMutableIndexSet to track the fake-sequences of all processed revisions; then we can find the first missing index in that set and not advance lastSequence past the revision with that fake-sequence. */
+        /* Updating self.lastSequence is tricky. It needs to be the received sequence ID of
+        the revision for which we've successfully received and inserted (or rejected) it and
+        all previous received revisions. That way, next time we can start tracking remote
+        changes from that sequence ID and know we haven't missed anything. */
+        /* FIX: The current code below doesn't quite achieve that: it tracks the latest
+        sequence ID we've successfully processed, but doesn't handle failures correctly
+        across multiple calls to -insertRevisions. I think correct behavior will require
+        keeping an NSMutableIndexSet to track the fake-sequences of all processed revisions;
+        then we can find the first missing index in that set and not advance lastSequence
+        past the revision with that fake-sequence. */
         Collections.sort(revs, new Comparator<List<Object>>() {
 
             public int compare(List<Object> list1, List<Object> list2) {
@@ -356,13 +390,13 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
 
             success = true;
         } catch(SQLException e) {
-            Log.w(CBLDatabase.TAG, this + ": Exception inserting revisions", e);
+            Log.e(CBLDatabase.TAG, this + ": Exception inserting revisions", e);
         } finally {
             db.endTransaction(success);
             asyncTaskFinished(revs.size());
         }
 
-        setChangesProcessed(getChangesProcessed() + revs.size());
+        setCompletedChangesCount(getCompletedChangesCount() + revs.size());
     }
 
     List<String> knownCurrentRevIDs(CBLRevisionInternal rev) {
@@ -378,7 +412,7 @@ public class CBLPuller extends CBLReplicator implements CBLChangeTrackerClient {
         }
         byte[] json = null;
         try {
-            json = CBLServer.getObjectMapper().writeValueAsBytes(strings);
+            json = CBLManager.getObjectMapper().writeValueAsBytes(strings);
         } catch (Exception e) {
             Log.w(CBLDatabase.TAG, "Unable to serialize json", e);
         }

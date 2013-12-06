@@ -5,8 +5,8 @@ package com.couchbase.cblite;
  */
 public interface CBLViewCompiler {
 
-    CBLMapFunction compileMapFunction(String mapSource, String language);
+    CBLMapper compileMap(String mapSource, String language);
 
-    CBLReduceFunction compileReduceFunction(String reduceSource, String language);
+    CBLReducer compileReduce(String reduceSource, String language);
 
 }

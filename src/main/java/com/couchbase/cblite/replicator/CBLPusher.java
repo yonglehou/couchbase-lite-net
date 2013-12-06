@@ -1,5 +1,24 @@
 package com.couchbase.cblite.replicator;
 
+import com.couchbase.cblite.CBLBlobKey;
+import com.couchbase.cblite.CBLBlobStore;
+import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.DocumentChange;
+import com.couchbase.cblite.ReplicationFilter;
+import com.couchbase.cblite.CBLManager;
+import com.couchbase.cblite.CBLRevisionList;
+import com.couchbase.cblite.CBLiteException;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.internal.InterfaceAudience;
+import com.couchbase.cblite.support.CBLRemoteRequestCompletionBlock;
+import com.couchbase.cblite.support.HttpClientFactory;
+import com.couchbase.cblite.util.Log;
+
+import org.apache.http.client.HttpResponseException;
+import org.apache.http.entity.mime.MultipartEntity;
+import org.apache.http.entity.mime.content.InputStreamBody;
+import org.apache.http.entity.mime.content.StringBody;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -9,64 +28,61 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Observable;
-import java.util.Observer;
 import java.util.concurrent.ScheduledExecutorService;
 
-import org.apache.http.client.HttpResponseException;
-import org.apache.http.entity.mime.MultipartEntity;
-import org.apache.http.entity.mime.content.InputStreamBody;
-import org.apache.http.entity.mime.content.StringBody;
+@InterfaceAudience.Private
+public class CBLPusher extends CBLReplicator implements CBLDatabase.ChangeListener {
 
-import android.util.Log;
-
-import com.couchbase.cblite.CBLBlobKey;
-import com.couchbase.cblite.CBLBlobStore;
-import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLFilterBlock;
-import com.couchbase.cblite.CBLiteException;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.CBLRevisionList;
-import com.couchbase.cblite.CBLServer;
-import com.couchbase.cblite.support.HttpClientFactory;
-import com.couchbase.cblite.support.CBLRemoteRequestCompletionBlock;
-
-public class CBLPusher extends CBLReplicator implements Observer {
-
-    private boolean createTarget;
+    private boolean shouldCreateTarget;
     private boolean observing;
-    private CBLFilterBlock filter;
+    private ReplicationFilter filter;
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     public CBLPusher(CBLDatabase db, URL remote, boolean continuous, ScheduledExecutorService workExecutor) {
         this(db, remote, continuous, null, workExecutor);
     }
 
+    /**
+     * Constructor
+     */
+    @InterfaceAudience.Private
     public CBLPusher(CBLDatabase db, URL remote, boolean continuous, HttpClientFactory clientFactory, ScheduledExecutorService workExecutor) {
         super(db, remote, continuous, clientFactory, workExecutor);
-        createTarget = false;
+        shouldCreateTarget = false;
         observing = false;
     }
-    
-    public boolean isCreateTarget() {
-        return createTarget;
+
+    @Override
+    @InterfaceAudience.Public
+    public boolean isPull() {
+        return false;
     }
 
+    @Override
+    @InterfaceAudience.Public
+    public boolean shouldCreateTarget() {
+        return shouldCreateTarget;
+    }
+
+    @Override
+    @InterfaceAudience.Public
     public void setCreateTarget(boolean createTarget) {
-        this.createTarget = createTarget;
+        this.shouldCreateTarget = createTarget;
     }
 
-    public void setFilter(CBLFilterBlock filter) {
+    @Override
+    @InterfaceAudience.Public
+    public void setFilter(ReplicationFilter filter) {
         this.filter = filter;
     }
 
-    @Override
-    public boolean isPush() {
-        return true;
-    }
 
     @Override
-    public void maybeCreateRemoteDB() {
-        if(!createTarget) {
+    void maybeCreateRemoteDB() {
+        if(!shouldCreateTarget) {
             return;
         }
         Log.v(CBLDatabase.TAG, "Remote db might not exist; creating it...");
@@ -80,7 +96,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
                     Log.v(CBLDatabase.TAG, "Created remote db");
 
                 }
-                createTarget = false;
+                shouldCreateTarget = false;
                 beginReplicating();
             }
 
@@ -91,7 +107,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
     public void beginReplicating() {
         // If we're still waiting to create the remote db, do nothing now. (This method will be
         // re-invoked after that request finishes; see maybeCreateRemoteDB() above.)
-        if(createTarget) {
+        if(shouldCreateTarget) {
             return;
         }
 
@@ -99,7 +115,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
             filter = db.getFilter(filterName);
         }
         if(filterName != null && filter == null) {
-            Log.w(CBLDatabase.TAG, String.format("%s: No CBLFilterBlock registered for filter '%s'; ignoring", this, filterName));;
+            Log.w(CBLDatabase.TAG, String.format("%s: No ReplicationFilter registered for filter '%s'; ignoring", this, filterName));;
         }
 
         // Process existing changes since the last push:
@@ -115,7 +131,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
         // Now listen for future changes (in continuous mode):
         if(continuous) {
             observing = true;
-            db.addObserver(this);
+            db.addChangeListener(this);
             asyncTaskStarted();  // prevents stopped() from being called when other tasks finish
         }
     }
@@ -129,23 +145,23 @@ public class CBLPusher extends CBLReplicator implements Observer {
     private void stopObserving() {
         if(observing) {
             observing = false;
-            db.deleteObserver(this);
+            db.removeChangeListener(this);
             asyncTaskFinished(1);
         }
     }
 
+
     @Override
-    public void update(Observable observable, Object data) {
-        //make sure this came from where we expected
-        if(observable == db) {
-            Map<String,Object> change = (Map<String,Object>)data;
+    public void changed(CBLDatabase.ChangeEvent event) {
+        List<DocumentChange> changes = event.getChanges();
+        for (DocumentChange change : changes) {
             // Skip revisions that originally came from the database I'm syncing to:
-            URL source = (URL)change.get("source");
-            if(source != null && source.equals(remote.toExternalForm())) {
+            URL source = change.getSourceUrl();
+            if(source != null && source.equals(remote)) {
                 return;
             }
-            CBLRevisionInternal rev = (CBLRevisionInternal)change.get("rev");
-            if(rev != null && ((filter == null) || filter.filter(rev))) {
+            CBLRevisionInternal rev = change.getRevisionInternal();
+            if(rev != null && ((filter == null) || filter.filter(rev, null))) {
                 addToInbox(rev);
             }
         }
@@ -173,7 +189,6 @@ public class CBLPusher extends CBLReplicator implements Observer {
 
             @Override
             public void onCompletion(Object response, Throwable e) {
-
 
                 Map<String,Object> results = (Map<String,Object>)response;
                 if(e != null) {
@@ -234,7 +249,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
                     bulkDocsBody.put("new_edits", false);
                     Log.i(CBLDatabase.TAG, String.format("%s: Sending %d revisions", this, numDocsToSend));
                     Log.v(CBLDatabase.TAG, String.format("%s: Sending %s", this, inbox));
-                    setChangesTotal(getChangesTotal() + numDocsToSend);
+                    setChangesCount(getChangesCount() + numDocsToSend);
                     asyncTaskStarted();
                     sendAsyncRequest("POST", "/_bulk_docs", bulkDocsBody, new CBLRemoteRequestCompletionBlock() {
 
@@ -246,7 +261,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
                                 Log.v(CBLDatabase.TAG, String.format("%s: Sent %s", this, inbox));
                                 setLastSequence(String.format("%d", lastInboxSequence));
                             }
-                            setChangesProcessed(getChangesProcessed() + numDocsToSend);
+                            setCompletedChangesCount(getCompletedChangesCount() + numDocsToSend);
                             asyncTaskFinished(1);
                         }
                     });
@@ -278,7 +293,7 @@ public class CBLPusher extends CBLReplicator implements Observer {
                     multiPart = new MultipartEntity();
 
                     try {
-                        String json  = CBLServer.getObjectMapper().writeValueAsString(revProps);
+                        String json  = CBLManager.getObjectMapper().writeValueAsString(revProps);
                         Charset utf8charset = Charset.forName("UTF-8");
                         multiPart.addPart("param1", new StringBody(json, "application/json", utf8charset));
 
@@ -297,15 +312,15 @@ public class CBLPusher extends CBLReplicator implements Observer {
                     multiPart = null;
                 }
                 else {
-                    // workaround for issue #80 - it was looking at the "content_type" field instead of "content-type".
-                    // fix is backwards compatible in case any code is using content_type.
                     String contentType = null;
                     if (attachment.containsKey("content_type")) {
                         contentType = (String) attachment.get("content_type");
-                        Log.w(CBLDatabase.TAG, "Found attachment that uses content_type field name instead of content-type: " + attachment);
                     }
                     else if (attachment.containsKey("content-type")) {
-                        contentType = (String) attachment.get("content-type");
+                        String message = String.format("Found attachment that uses content-type" +
+                                " field name instead of content_type (see couchbase-lite-android" +
+                                " issue #80): " + attachment);
+                        Log.w(CBLDatabase.TAG, message);
                     }
                     multiPart.addPart(attachmentKey, new InputStreamBody(inputStream, contentType, attachmentKey));
                 }

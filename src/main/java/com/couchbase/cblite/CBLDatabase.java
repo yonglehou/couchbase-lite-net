@@ -17,6 +17,28 @@
 
 package com.couchbase.cblite;
 
+
+import android.text.TextUtils;
+import android.util.LruCache;
+
+import com.couchbase.cblite.CBLDatabase.TDContentOptions;
+import com.couchbase.cblite.internal.CBLAttachmentInternal;
+import com.couchbase.cblite.internal.CBLBody;
+import com.couchbase.cblite.internal.CBLRevisionInternal;
+import com.couchbase.cblite.internal.InterfaceAudience;
+import com.couchbase.cblite.replicator.CBLPuller;
+import com.couchbase.cblite.replicator.CBLPusher;
+import com.couchbase.cblite.replicator.CBLReplicator;
+import com.couchbase.cblite.storage.ContentValues;
+import com.couchbase.cblite.storage.Cursor;
+import com.couchbase.cblite.storage.SQLException;
+import com.couchbase.cblite.storage.SQLiteStorageEngine;
+import com.couchbase.cblite.storage.SQLiteStorageEngineFactory;
+import com.couchbase.cblite.support.Base64;
+import com.couchbase.cblite.support.FileDirUtils;
+import com.couchbase.cblite.support.HttpClientFactory;
+import com.couchbase.cblite.util.Log;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,52 +49,38 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Observable;
 import java.util.Set;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
-
-import android.content.ContentValues;
-import android.database.Cursor;
-import android.database.SQLException;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteException;
-import android.text.TextUtils;import android.util.Log;
-
-import com.couchbase.cblite.CBLDatabase.TDContentOptions;
-import com.couchbase.cblite.internal.CBLAttachmentInternal;
-import com.couchbase.cblite.internal.CBLBody;
-import com.couchbase.cblite.internal.CBLDatabaseInternal;
-import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.replicator.CBLPuller;
-import com.couchbase.cblite.replicator.CBLPusher;
-import com.couchbase.cblite.replicator.CBLReplicator;
-import com.couchbase.cblite.support.Base64;
-import com.couchbase.cblite.support.FileDirUtils;
-import com.couchbase.cblite.support.HttpClientFactory;
-import com.couchbase.touchdb.TDCollateJSON;
 
 /**
  * A CouchbaseLite database.
  */
-public class CBLDatabase extends Observable {
+public class CBLDatabase {
+
+    private static final int MAX_DOC_CACHE_SIZE = 50;
+    private static CBLReplicationFilterCompiler filterCompiler;
 
     private String path;
     private String name;
-    private SQLiteDatabase sqliteDb;
+    private SQLiteStorageEngine database;
+
     private boolean open = false;
     private int transactionLevel = 0;
+
     public static final String TAG = "CBLDatabase";
+    public static final String TAG_SQL = "CBLSQL";
 
     private Map<String, CBLView> views;
-    private Map<String, CBLFilterBlock> filters;
-    private Map<String, CBLFilterCompiler> filterCompiler;
+    private Map<String, ReplicationFilter> filters;
     private Map<String, CBLValidationBlock> validations;
 
     private Map<String, CBLBlobStoreWriter> pendingAttachmentsByDigest;
     private List<CBLReplicator> activeReplicators;
     private CBLBlobStore attachments;
     private CBLManager manager;
-    private CBLDatabaseInternal dbInternal;
+    private List<ChangeListener> changeListeners;
+    private LruCache<String, CBLDocument> docCache;
 
     // Length that constitutes a 'big' attachment
     public static int kBigAttachmentLength = (16*1024);
@@ -148,30 +156,162 @@ public class CBLDatabase extends Observable {
 
 
     /**
-     * The database manager that owns this database.
+     * Returns the currently registered filter compiler (nil by default).
      */
-    public CBLManager getManager() {
-        return manager;
+    @InterfaceAudience.Public
+    public static CBLReplicationFilterCompiler getFilterCompiler() {
+        return filterCompiler;
     }
 
-    public URL getInternalURL() {
-        // TODO: implement this
-        throw new RuntimeException("Not implemented");
+    /**
+     * Registers an object that can compile source code into executable filter blocks.
+     */
+    @InterfaceAudience.Public
+    public static void setFilterCompiler(CBLReplicationFilterCompiler filterCompiler) {
+        CBLDatabase.filterCompiler = filterCompiler;
     }
-
 
     /**
      * Constructor
-     *
-     * @param path
-     * @param manager
      */
+    @InterfaceAudience.Private
     public CBLDatabase(String path, CBLManager manager) {
         assert(path.startsWith("/")); //path must be absolute
         this.path = path;
         this.name = FileDirUtils.getDatabaseNameFromPath(path);
         this.manager = manager;
+        this.changeListeners = new ArrayList<ChangeListener>();
+        this.docCache = new LruCache<String, CBLDocument>(MAX_DOC_CACHE_SIZE);
     }
+
+    /**
+     * Get the database's name.
+     */
+    @InterfaceAudience.Public
+    public String getName() {
+        return name;
+    }
+
+    /**
+     * The database manager that owns this database.
+     */
+    @InterfaceAudience.Public
+    public CBLManager getManager() {
+        return manager;
+    }
+
+    /**
+     * The number of documents in the database.
+     */
+    @InterfaceAudience.Public
+    public int getDocumentCount() {
+        String sql = "SELECT COUNT(DISTINCT doc_id) FROM revs WHERE current=1 AND deleted=0";
+        Cursor cursor = null;
+        int result = 0;
+        try {
+            cursor = database.rawQuery(sql, null);
+            if(cursor.moveToNext()) {
+                result = cursor.getInt(0);
+            }
+        } catch(SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error getting document count", e);
+        } finally {
+            if(cursor != null) {
+                cursor.close();
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * The latest sequence number used.  Every new revision is assigned a new sequence number,
+     * so this property increases monotonically as changes are made to the database. It can be
+     * used to check whether the database has changed between two points in time.
+     */
+    @InterfaceAudience.Public
+    public long getLastSequenceNumber() {
+        String sql = "SELECT MAX(sequence) FROM revs";
+        Cursor cursor = null;
+        long result = 0;
+        try {
+            cursor = database.rawQuery(sql, null);
+            if(cursor.moveToNext()) {
+                result = cursor.getLong(0);
+            }
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error getting last sequence", e);
+        } finally {
+            if(cursor != null) {
+                cursor.close();
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Get all the replicators associated with this database.
+     */
+    @InterfaceAudience.Public
+    public List<CBLReplicator> getAllReplications() {
+        return activeReplicators;
+    }
+
+    /**
+     * Compacts the database file by purging non-current revisions, deleting unused attachment files,
+     * and running a SQLite "VACUUM" command.
+     */
+    @InterfaceAudience.Public
+    public CBLStatus compact() {
+        // Can't delete any rows because that would lose revision tree history.
+        // But we can remove the JSON of non-current revisions, which is most of the space.
+        try {
+            Log.v(CBLDatabase.TAG, "Deleting JSON of old revisions...");
+            ContentValues args = new ContentValues();
+            args.put("json", (String)null);
+            database.update("revs", args, "current=0", null);
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error compacting", e);
+            return new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        Log.v(CBLDatabase.TAG, "Deleting old attachments...");
+        CBLStatus result = garbageCollectAttachments();
+
+        Log.v(CBLDatabase.TAG, "Vacuuming SQLite sqliteDb...");
+        try {
+            database.execSQL("VACUUM");
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error vacuuming sqliteDb", e);
+            return new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        return result;
+    }
+
+
+    /**
+     * Deletes the database.
+     */
+    @InterfaceAudience.Public
+    public boolean delete() {
+        if(open) {
+            if(!close()) {
+                return false;
+            }
+        }
+        else if(!exists()) {
+            return true;
+        }
+        File file = new File(path);
+        File attachmentsFile = new File(getAttachmentStorePath());
+
+        boolean deleteStatus = file.delete();
+        //recursively delete attachments path
+        boolean deleteAttachmentStatus = FileDirUtils.deleteRecursive(attachmentsFile);
+        return deleteStatus && deleteAttachmentStatus;
+    }
+
 
     /**
      * Instantiates a CBLDocument object with the given ID.
@@ -185,28 +325,328 @@ public class CBLDatabase extends Observable {
      * @param documentId
      * @return
      */
+    @InterfaceAudience.Public
     public CBLDocument getDocument(String documentId) {
-        // TODO: try to get from cache first
+
         if (documentId == null || documentId.length() == 0) {
             return null;
         }
-        return new CBLDocument(this, documentId);
+        CBLDocument doc = docCache.get(documentId);
+        if (doc == null) {
+            doc = new CBLDocument(this, documentId);
+            if (doc == null) {
+                return null;
+            }
+            docCache.put(documentId, doc);
+        }
+        return doc;
+    }
+
+    /**
+     * Gets the Document with the given id, or null if it does not exist.
+     */
+    @InterfaceAudience.Public
+    public CBLDocument getExistingDocument(String documentId) {
+        if (documentId == null || documentId.length() == 0) {
+            return null;
+        }
+        CBLRevisionInternal revisionInternal = getDocumentWithIDAndRev(documentId, null, EnumSet.noneOf(CBLDatabase.TDContentOptions.class));
+        if (revisionInternal == null) {
+            return null;
+        }
+        return getDocument(documentId);
     }
 
     /**
      * Creates a new CBLDocument object with no properties and a new (random) UUID.
-     * The document will be saved to the database when you call -putProperties: on it.
+     * The document will be saved to the database when you call -createRevision: on it.
      */
-    public CBLDocument getUntitledDocument() {
+    @InterfaceAudience.Public
+    public CBLDocument createDocument() {
         return getDocument(CBLMisc.TDCreateUUID());
+    }
+
+    /**
+     * Returns the contents of the local document with the given ID, or nil if none exists.
+     */
+    @InterfaceAudience.Public
+    public Map<String, Object> getExistingLocalDocument(String documentId) {
+        return getLocalDocument(makeLocalDocumentId(documentId), null).getProperties();
+    }
+
+    /**
+     * Sets the contents of the local document with the given ID. Unlike CouchDB, no revision-ID
+     * checking is done; the put always succeeds. If the properties dictionary is nil, the document
+     * will be deleted.
+     */
+    @InterfaceAudience.Public
+    public boolean putLocalDocument(Map<String, Object> properties, String id) throws CBLiteException {
+        // TODO: there was some code in the iOS implementation equivalent that I did not know if needed
+        CBLRevisionInternal prevRev = getLocalDocument(id, null);
+        if (prevRev == null && properties == null) {
+            return false;
+        }
+        return putLocalRevision(prevRev, prevRev.getRevId()) != null;
+    }
+
+    /**
+     * Deletes the local document with the given ID.
+     */
+    @InterfaceAudience.Public
+    public boolean deleteLocalDocument(String id) throws CBLiteException {
+        CBLRevisionInternal prevRev = getLocalDocument(id, null);
+        if (prevRev == null) {
+            return false;
+        }
+        deleteLocalDocument(id, prevRev.getRevId());
+        return true;
+    }
+
+    /**
+     * Returns a query that matches all documents in the database.
+     * This is like querying an imaginary view that emits every document's ID as a key.
+     */
+    @InterfaceAudience.Public
+    public CBLQuery createAllDocumentsQuery() {
+        return new CBLQuery(this, (CBLView)null);
+    }
+
+    /**
+     * Returns a CBLView object for the view with the given name.
+     * (This succeeds even if the view doesn't already exist, but the view won't be added to
+     * the database until the CBLView is assigned a map function.)
+     */
+    @InterfaceAudience.Public
+    public CBLView getView(String name) {
+        CBLView view = null;
+        if(views != null) {
+            view = views.get(name);
+        }
+        if(view != null) {
+            return view;
+        }
+        return registerView(new CBLView(this, name));
+    }
+
+    /**
+     * Returns the existing CBLView with the given name, or nil if none.
+     */
+    @InterfaceAudience.Public
+    public CBLView getExistingView(String name) {
+        CBLView view = null;
+        if(views != null) {
+            view = views.get(name);
+        }
+        if(view != null) {
+            return view;
+        }
+        view = new CBLView(this, name);
+        if(view.getViewId() == 0) {
+            return null;
+        }
+
+        return registerView(view);
+    }
+
+    /**
+     * Returns the existing document validation function (block) registered with the given name.
+     * Note that validations are not persistent -- you have to re-register them on every launch.
+     */
+    @InterfaceAudience.Public
+    public CBLValidationBlock getValidation(String name) {
+        CBLValidationBlock result = null;
+        if(validations != null) {
+            result = validations.get(name);
+        }
+        return result;
+    }
+
+    /**
+     * Defines or clears a named document validation function.
+     * Before any change to the database, all registered validation functions are called and given a
+     * chance to reject it. (This includes incoming changes from a pull replication.)
+     */
+    @InterfaceAudience.Public
+    public void setValidation(String name, CBLValidationBlock validationBlock) {
+        if(validations == null) {
+            validations = new HashMap<String, CBLValidationBlock>();
+        }
+        if (validationBlock != null) {
+            validations.put(name, validationBlock);
+        }
+        else {
+            validations.remove(name);
+        }
+    }
+
+    /**
+     * Returns the existing filter function (block) registered with the given name.
+     * Note that filters are not persistent -- you have to re-register them on every launch.
+     */
+    @InterfaceAudience.Public
+    public ReplicationFilter getFilter(String filterName) {
+        ReplicationFilter result = null;
+        if(filters != null) {
+            result = filters.get(filterName);
+        }
+        if (result == null) {
+            CBLReplicationFilterCompiler filterCompiler = getFilterCompiler();
+            if (filterCompiler == null) {
+                return null;
+            }
+
+            List<String> outLanguageList = new ArrayList<String>();
+            String sourceCode = getDesignDocFunction(filterName, "filters", outLanguageList);
+            if (sourceCode == null) {
+                return null;
+            }
+            String language = outLanguageList.get(0);
+            ReplicationFilter filter = filterCompiler.compileFilterFunction(sourceCode, language);
+            if (filter == null) {
+                Log.w(CBLDatabase.TAG, String.format("Filter %s failed to compile", filterName));
+                return null;
+            }
+            setFilter(filterName, filter);
+            return filter;
+        }
+        return result;
+    }
+
+    /**
+     * Define or clear a named filter function.
+     *
+     * Filters are used by push replications to choose which documents to send.
+     */
+    @InterfaceAudience.Public
+    public void setFilter(String filterName, ReplicationFilter filter) {
+        if(filters == null) {
+            filters = new HashMap<String,ReplicationFilter>();
+        }
+        if (filter != null) {
+            filters.put(filterName, filter);
+        }
+        else {
+            filters.remove(filterName);
+        }
+    }
+
+    /**
+     * Runs the block within a transaction. If the block returns NO, the transaction is rolled back.
+     * Use this when performing bulk write operations like multiple inserts/updates;
+     * it saves the overhead of multiple SQLite commits, greatly improving performance.
+     *
+     * Does not commit the transaction if the code throws an Exception.
+     *
+     * TODO: the iOS version has a retry loop, so there should be one here too
+     *
+     * @param databaseFunction
+     */
+    @InterfaceAudience.Public
+    public boolean runInTransaction(TransactionTask databaseFunction) {
+
+        boolean shouldCommit = true;
+
+        beginTransaction();
+        try {
+            shouldCommit = databaseFunction.run();
+        } catch (Exception e) {
+            shouldCommit = false;
+            Log.e(CBLDatabase.TAG, e.toString(), e);
+            throw new RuntimeException(e);
+        } finally {
+            endTransaction(shouldCommit);
+        }
+
+        return shouldCommit;
+    }
+
+    /**
+     * Runs the delegate asynchronously.
+     */
+    Future runAsync(final AsyncTask function) {
+        return getManager().runAsync(new Runnable() {
+            @Override
+            public void run() {
+                function.run(CBLDatabase.this);
+            }
+        });
+    }
+
+    /**
+     * Creates a replication that will 'push' to a database at the given URL, or returns an existing
+     * such replication if there already is one.
+     *
+     * @param remote
+     * @return
+     */
+    @InterfaceAudience.Public
+    public CBLReplicator getPushReplication(URL remote) {
+        return manager.replicationWithDatabase(this, remote, true, true, false);
+    }
+
+    /**
+     * Creates a replication that will 'pull' from a database at the given URL, or returns an existing
+     * such replication if there already is one.
+     *
+     * @param remote
+     * @return
+     */
+    @InterfaceAudience.Public
+    public CBLReplicator getPullReplication(URL remote) {
+        return manager.replicationWithDatabase(this, remote, false, true, false);
+    }
+
+
+    /**
+     * Creates a pair of replications to both pull and push to database at the given URL, or
+     * returns existing replications if there are any.
+     *
+     * @param remote
+     * @return An array whose first element is the "pull" replication and second is the "push".
+     */
+    @InterfaceAudience.Public
+    public List<CBLReplicator> getReplications(URL remote) {
+        CBLReplicator pull;
+        CBLReplicator push;
+        if (remote != null) {
+            pull = getPullReplication(remote);
+            push = getPushReplication(remote);
+            ArrayList<CBLReplicator> result = new ArrayList<CBLReplicator>();
+            result.add(pull);
+            result.add(push);
+            return result;
+        }
+        return null;
+    }
+
+    /**
+     * Adds a Database change delegate that will be called whenever a Document within the Database changes.
+     * @param listener
+     */
+    @InterfaceAudience.Public
+    public void addChangeListener(ChangeListener listener) {
+        changeListeners.add(listener);
+    }
+
+    /**
+     * Removes the specified delegate as a listener for the Database change event.
+     * @param listener
+     */
+    @InterfaceAudience.Public
+    public void removeChangeListener(ChangeListener listener) {
+        changeListeners.remove(listener);
+    }
+
+    public URL getInternalURL() {
+        // TODO: implement this
+        throw new RuntimeException("Not implemented");
     }
 
     /**
      * Returns the already-instantiated cached CBLDocument with the given ID, or nil if none is yet cached.
      */
     public CBLDocument getCachedDocument(String documentID) {
-        // TODO: implement
-        throw new RuntimeException("Not implemented");
+        return docCache.get(documentID);
     }
 
     /**
@@ -214,12 +654,11 @@ public class CBLDatabase extends Observable {
      * API calls will now instantiate and return new instances.
      */
     public void clearDocumentCache() {
-        // TODO: implement
-        throw new RuntimeException("Not implemented");
+        docCache.evictAll();
     }
 
     void removeDocumentFromCache(CBLDocument document) {
-        // TODO: implement
+        docCache.remove(document.getId());
     }
 
     public String toString() {
@@ -230,30 +669,7 @@ public class CBLDatabase extends Observable {
         return new File(path).exists();
     }
 
-    /**
-     * Replaces the sqliteDb with a copy of another sqliteDb.
-     *
-     * This is primarily used to install a canned sqliteDb on first launch of an app, in which case you should
-     * first check .exists to avoid replacing the sqliteDb if it exists already. The canned sqliteDb
-     * would have been copied into your app bundle at build time.
-     *
-     * @param databasePath  Path of the sqliteDb file that should replace this one.
-     * @param attachmentsPath  Path of the associated attachments directory, or nil if there are no attachments.
-     * @return  true if the sqliteDb was copied, IOException if an error occurs
-     **/
-    public boolean replaceWithDatabase(String databasePath, String attachmentsPath) throws IOException {
-        String dstAttachmentsPath = this.getAttachmentStorePath();
-        File sourceFile = new File(databasePath);
-        File destFile = new File(path);
-        FileDirUtils.copyFile(sourceFile, destFile);
-        File attachmentsFile = new File(dstAttachmentsPath);
-        FileDirUtils.deleteRecursive(attachmentsFile);
-        attachmentsFile.mkdirs();
-        if(attachmentsPath != null) {
-            FileDirUtils.copyFolder(new File(attachmentsPath), attachmentsFile);
-        }
-        return true;
-    }
+
 
     public String getAttachmentStorePath() {
         String attachmentStorePath = path;
@@ -284,7 +700,7 @@ public class CBLDatabase extends Observable {
     public boolean initialize(String statements) {
         try {
             for (String statement : statements.split(";")) {
-                sqliteDb.execSQL(statement);
+                database.execSQL(statement);
             }
         } catch (SQLException e) {
             close();
@@ -298,16 +714,13 @@ public class CBLDatabase extends Observable {
             return true;
         }
 
-        try {
-            sqliteDb = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.CREATE_IF_NECESSARY);
-            TDCollateJSON.registerCustomCollators(sqliteDb);
-        }
-        catch(SQLiteException e) {
-            Log.e(CBLDatabase.TAG, "Error opening", e);
+        // Create the storage engine.
+        database = SQLiteStorageEngineFactory.createStorageEngine();
+
+        // Try to open the storage engine and stop if we fail.
+        if (database == null || !database.open(path)) {
             return false;
         }
-
-        dbInternal = new CBLDatabaseInternal(this, sqliteDb);
 
         // Stuff we need to initialize every time the sqliteDb opens:
         if(!initialize("PRAGMA foreign_keys = ON;")) {
@@ -316,12 +729,12 @@ public class CBLDatabase extends Observable {
         }
 
         // Check the user_version number we last stored in the sqliteDb:
-        int dbVersion = sqliteDb.getVersion();
+        int dbVersion = database.getVersion();
 
         // Incompatible version changes increment the hundreds' place:
         if(dbVersion >= 100) {
             Log.w(CBLDatabase.TAG, "CBLDatabase: Database version (" + dbVersion + ") is newer than I know how to work with");
-            sqliteDb.close();
+            database.close();
             return false;
         }
 
@@ -330,7 +743,7 @@ public class CBLDatabase extends Observable {
             // (Note: Declaring revs.sequence as AUTOINCREMENT means the values will always be
             // monotonically increasing, never reused. See <http://www.sqlite.org/autoinc.html>)
             if(!initialize(SCHEMA)) {
-                sqliteDb.close();
+                database.close();
                 return false;
             }
             dbVersion = 3;
@@ -341,7 +754,7 @@ public class CBLDatabase extends Observable {
             String upgradeSql = "ALTER TABLE attachments ADD COLUMN revpos INTEGER DEFAULT 0; " +
                                 "PRAGMA user_version = 2";
             if(!initialize(upgradeSql)) {
-                sqliteDb.close();
+                database.close();
                 return false;
             }
             dbVersion = 2;
@@ -355,7 +768,7 @@ public class CBLDatabase extends Observable {
                     "CREATE INDEX localdocs_by_docid ON localdocs(docid); " +
                     "PRAGMA user_version = 3";
             if(!initialize(upgradeSql)) {
-                sqliteDb.close();
+                database.close();
                 return false;
             }
             dbVersion = 3;
@@ -369,7 +782,7 @@ public class CBLDatabase extends Observable {
                     "INSERT INTO INFO (key, value) VALUES ('publicUUID',  '" + CBLMisc.TDCreateUUID() + "'); " +
                     "PRAGMA user_version = 4";
             if(!initialize(upgradeSql)) {
-                sqliteDb.close();
+                database.close();
                 return false;
             }
         }
@@ -378,7 +791,7 @@ public class CBLDatabase extends Observable {
             attachments = new CBLBlobStore(getAttachmentStorePath());
         } catch (IllegalArgumentException e) {
             Log.e(CBLDatabase.TAG, "Could not initialize attachment store", e);
-            sqliteDb.close();
+            database.close();
             return false;
         }
 
@@ -405,54 +818,25 @@ public class CBLDatabase extends Observable {
             activeReplicators = null;
         }
 
-        if(sqliteDb != null && sqliteDb.isOpen()) {
-            sqliteDb.close();
+        if(database != null && database.isOpen()) {
+            database.close();
         }
         open = false;
         transactionLevel = 0;
         return true;
     }
 
-    /**
-     * Deletes the database.
-     */
-    public boolean delete() {
-        if(open) {
-            if(!close()) {
-                return false;
-            }
-        }
-        else if(!exists()) {
-            return true;
-        }
-        File file = new File(path);
-        File attachmentsFile = new File(getAttachmentStorePath());
-
-        boolean deleteStatus = file.delete();
-        //recursively delete attachments path
-        boolean deleteAttachmentStatus = FileDirUtils.deleteRecursive(attachmentsFile);
-        return deleteStatus && deleteAttachmentStatus;
-    }
 
     public String getPath() {
         return path;
     }
 
-    /**
-     * The database's name.
-     */
-    public String getName() {
-        return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
 
     // Leave this package protected, so it can only be used
     // CBLView uses this accessor
-    public SQLiteDatabase getSqliteDb() {
-        return sqliteDb;
+
+    SQLiteStorageEngine getDatabase() {
+        return database;
     }
 
     public CBLBlobStore getAttachments() {
@@ -472,15 +856,16 @@ public class CBLDatabase extends Observable {
 
 
     /**
-     * Begins a sqliteDb transaction. Transactions can nest.
+     * Begins a database transaction. Transactions can nest.
      * Every beginTransaction() must be balanced by a later endTransaction()
      */
     public boolean beginTransaction() {
         try {
-            sqliteDb.beginTransaction();
+            database.beginTransaction();
             ++transactionLevel;
-            //Log.v(TAG, "Begin transaction (level " + Integer.toString(transactionLevel) + ")...");
+            Log.i(CBLDatabase.TAG_SQL, Thread.currentThread().getName() + " Begin transaction (level " + Integer.toString(transactionLevel) + ")");
         } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, Thread.currentThread().getName() + " Error calling beginTransaction()", e);
             return false;
         }
         return true;
@@ -492,18 +877,20 @@ public class CBLDatabase extends Observable {
      * @param commit If true, commits; if false, aborts and rolls back, undoing all changes made since the matching -beginTransaction call, *including* any committed nested transactions.
      */
     public boolean endTransaction(boolean commit) {
+
         assert(transactionLevel > 0);
 
         if(commit) {
-            //Log.v(TAG, "Committing transaction (level " + Integer.toString(transactionLevel) + ")...");
-            sqliteDb.setTransactionSuccessful();
-            sqliteDb.endTransaction();
+            Log.i(CBLDatabase.TAG_SQL, Thread.currentThread().getName() + " Committing transaction (level " + Integer.toString(transactionLevel) + ")");
+            database.setTransactionSuccessful();
+            database.endTransaction();
         }
         else {
-            Log.v(TAG, "CANCEL transaction (level " + Integer.toString(transactionLevel) + ")...");
+            Log.i(TAG_SQL, Thread.currentThread().getName() + " CANCEL transaction (level " + Integer.toString(transactionLevel) + ")");
             try {
-                sqliteDb.endTransaction();
+                database.endTransaction();
             } catch (SQLException e) {
+                Log.e(CBLDatabase.TAG, Thread.currentThread().getName() + " Error calling endTransaction()", e);
                 return false;
             }
         }
@@ -512,71 +899,14 @@ public class CBLDatabase extends Observable {
         return true;
     }
 
-    /**
-     * Runs the block within a transaction. If the block returns NO, the transaction is rolled back.
-     * Use this when performing bulk write operations like multiple inserts/updates;
-     * it saves the overhead of multiple SQLite commits, greatly improving performance.
-     *
-     * Does not commit the transaction if the code throws an Exception.
-     *
-     * TODO: the iOS version has a retry loop, so there should be one here too
-     *
-     * @param databaseFunction
-     */
-    public void inTransaction(CBLDatabaseFunction databaseFunction) {
 
-        boolean shouldCommit = true;
-
-        beginTransaction();
-        try {
-            shouldCommit = databaseFunction.performFunction();
-        } catch (Exception e) {
-            shouldCommit = false;
-            Log.e(CBLDatabase.TAG, e.toString(), e);
-            throw new RuntimeException(e);
-        } finally {
-            endTransaction(shouldCommit);
-        }
-
-    }
-
-    /**
-     * Compacts the database file by purging non-current revisions, deleting unused attachment files,
-     * and running a SQLite "VACUUM" command.
-     */
-    public CBLStatus compact() {
-        // Can't delete any rows because that would lose revision tree history.
-        // But we can remove the JSON of non-current revisions, which is most of the space.
-        try {
-            Log.v(CBLDatabase.TAG, "Deleting JSON of old revisions...");
-            ContentValues args = new ContentValues();
-            args.put("json", (String)null);
-            sqliteDb.update("revs", args, "current=0", null);
-        } catch (SQLException e) {
-            Log.e(CBLDatabase.TAG, "Error compacting", e);
-            return new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
-        }
-
-        Log.v(CBLDatabase.TAG, "Deleting old attachments...");
-        CBLStatus result = garbageCollectAttachments();
-
-        Log.v(CBLDatabase.TAG, "Vacuuming SQLite sqliteDb...");
-        try {
-            sqliteDb.execSQL("VACUUM");
-        } catch (SQLException e) {
-            Log.e(CBLDatabase.TAG, "Error vacuuming sqliteDb", e);
-            return new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
-        }
-
-        return result;
-    }
 
     public String privateUUID() {
         String result = null;
         Cursor cursor = null;
         try {
-            cursor = sqliteDb.rawQuery("SELECT value FROM info WHERE key='privateUUID'", null);
-            if(cursor.moveToFirst()) {
+            cursor = database.rawQuery("SELECT value FROM info WHERE key='privateUUID'", null);
+            if(cursor.moveToNext()) {
                 result = cursor.getString(0);
             }
         } catch(SQLException e) {
@@ -593,8 +923,8 @@ public class CBLDatabase extends Observable {
         String result = null;
         Cursor cursor = null;
         try {
-            cursor = sqliteDb.rawQuery("SELECT value FROM info WHERE key='publicUUID'", null);
-            if(cursor.moveToFirst()) {
+            cursor = database.rawQuery("SELECT value FROM info WHERE key='publicUUID'", null);
+            if(cursor.moveToNext()) {
                 result = cursor.getString(0);
             }
         } catch(SQLException e) {
@@ -609,52 +939,7 @@ public class CBLDatabase extends Observable {
 
     /** GETTING DOCUMENTS: **/
 
-    /**
-     * The number of documents in the database.
-     */
-    public int getDocumentCount() {
-        String sql = "SELECT COUNT(DISTINCT doc_id) FROM revs WHERE current=1 AND deleted=0";
-        Cursor cursor = null;
-        int result = 0;
-        try {
-            cursor = sqliteDb.rawQuery(sql, null);
-            if(cursor.moveToFirst()) {
-                result = cursor.getInt(0);
-            }
-        } catch(SQLException e) {
-            Log.e(CBLDatabase.TAG, "Error getting document count", e);
-        } finally {
-            if(cursor != null) {
-                cursor.close();
-            }
-        }
 
-        return result;
-    }
-
-    /**
-     * The latest sequence number used.  Every new revision is assigned a new sequence number,
-     * so this property increases monotonically as changes are made to the database. It can be
-     * used to check whether the database has changed between two points in time.
-     */
-    public long getLastSequence() {
-        String sql = "SELECT MAX(sequence) FROM revs";
-        Cursor cursor = null;
-        long result = 0;
-        try {
-            cursor = sqliteDb.rawQuery(sql, null);
-            if(cursor.moveToFirst()) {
-                result = cursor.getLong(0);
-            }
-        } catch (SQLException e) {
-            Log.e(CBLDatabase.TAG, "Error getting last sequence", e);
-        } finally {
-            if(cursor != null) {
-                cursor.close();
-            }
-        }
-        return result;
-    }
 
     /** Splices the contents of an NSDictionary into JSON data (that already represents a dict), without parsing the JSON. */
     public  byte[] appendDictToJSON(byte[] json, Map<String,Object> dict) {
@@ -664,7 +949,7 @@ public class CBLDatabase extends Observable {
 
         byte[] extraJSON = null;
         try {
-            extraJSON = CBLServer.getObjectMapper().writeValueAsBytes(dict);
+            extraJSON = CBLManager.getObjectMapper().writeValueAsBytes(dict);
         } catch (Exception e) {
             Log.e(CBLDatabase.TAG, "Error convert extra JSON to bytes", e);
             return null;
@@ -775,9 +1060,9 @@ public class CBLDatabase extends Observable {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> documentPropertiesFromJSON(byte[] json, String docId, String revId, long sequence, EnumSet<TDContentOptions> contentOptions) {
+    public Map<String, Object> documentPropertiesFromJSON(byte[] json, String docId, String revId, boolean deleted, long sequence, EnumSet<TDContentOptions> contentOptions) {
 
-        CBLRevisionInternal rev = new CBLRevisionInternal(docId, revId, false, this);
+        CBLRevisionInternal rev = new CBLRevisionInternal(docId, revId, deleted, this);
         rev.setSequence(sequence);
         Map<String, Object> extra = extraPropertiesForRevision(rev, contentOptions);
         if (json == null) {
@@ -786,7 +1071,7 @@ public class CBLDatabase extends Observable {
 
         Map<String, Object> docProperties = null;
         try {
-            docProperties = CBLServer.getObjectMapper().readValue(json, Map.class);
+            docProperties = CBLManager.getObjectMapper().readValue(json, Map.class);
             docProperties.putAll(extra);
             return docProperties;
         } catch (Exception e) {
@@ -810,15 +1095,15 @@ public class CBLDatabase extends Observable {
             if(rev != null) {
                 sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=? AND revs.doc_id=docs.doc_id AND revid=? LIMIT 1";
                 String[] args = {id, rev};
-                cursor = sqliteDb.rawQuery(sql, args);
+                cursor = database.rawQuery(sql, args);
             }
             else {
                 sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=? AND revs.doc_id=docs.doc_id and current=1 and deleted=0 ORDER BY revid DESC LIMIT 1";
                 String[] args = {id};
-                cursor = sqliteDb.rawQuery(sql, args);
+                cursor = database.rawQuery(sql, args);
             }
 
-            if(cursor.moveToFirst()) {
+            if(cursor.moveToNext()) {
                 if(rev == null) {
                     rev = cursor.getString(0);
                 }
@@ -858,8 +1143,8 @@ public class CBLDatabase extends Observable {
         try {
             String sql = "SELECT sequence, json FROM revs, docs WHERE revid=? AND docs.docid=? AND revs.doc_id=docs.doc_id LIMIT 1";
             String[] args = { rev.getRevId(), rev.getDocId()};
-            cursor = sqliteDb.rawQuery(sql, args);
-            if(cursor.moveToFirst()) {
+            cursor = database.rawQuery(sql, args);
+            if(cursor.moveToNext()) {
                 result.setCode(CBLStatus.OK);
                 rev.setSequence(cursor.getLong(0));
                 expandStoredJSONIntoRevisionWithAttachments(cursor.getBlob(1), rev, contentOptions);
@@ -880,9 +1165,9 @@ public class CBLDatabase extends Observable {
 
         long result = -1;
         try {
-            cursor = sqliteDb.rawQuery("SELECT doc_id FROM docs WHERE docid=?", args);
+            cursor = database.rawQuery("SELECT doc_id FROM docs WHERE docid=?", args);
 
-            if(cursor.moveToFirst()) {
+            if(cursor.moveToNext()) {
                 result = cursor.getLong(0);
             }
             else {
@@ -919,11 +1204,11 @@ public class CBLDatabase extends Observable {
         String[] args = { Long.toString(docNumericID) };
         Cursor cursor = null;
 
-        cursor = sqliteDb.rawQuery(sql, args);
+        cursor = database.rawQuery(sql, args);
 
         CBLRevisionList result;
         try {
-            cursor.moveToFirst();
+            cursor.moveToNext();
             result = new CBLRevisionList();
             while(!cursor.isAfterLast()) {
                 CBLRevisionInternal rev = new CBLRevisionInternal(docId, cursor.getString(1), (cursor.getInt(2) > 0), this);
@@ -966,9 +1251,9 @@ public class CBLDatabase extends Observable {
         Cursor cursor = null;
         try {
             String[] args = { Long.toString(docIdNumeric) };
-            cursor = sqliteDb.rawQuery("SELECT revid FROM revs WHERE doc_id=? AND current " +
+            cursor = database.rawQuery("SELECT revid FROM revs WHERE doc_id=? AND current " +
                                            "ORDER BY revid DESC OFFSET 1", args);
-            cursor.moveToFirst();
+            cursor.moveToNext();
             while(!cursor.isAfterLast()) {
                 result.add(cursor.getString(0));
                 cursor.moveToNext();
@@ -989,35 +1274,35 @@ public class CBLDatabase extends Observable {
     public String findCommonAncestorOf(CBLRevisionInternal rev, List<String> revIDs) {
         String result = null;
 
-    	if (revIDs.size() == 0)
-    		return null;
-    	String docId = rev.getDocId();
-    	long docNumericID = getDocNumericID(docId);
-    	if (docNumericID <= 0)
-    		return null;
-    	String quotedRevIds = joinQuoted(revIDs);
-    	String sql = "SELECT revid FROM revs " +
-    			"WHERE doc_id=? and revid in (" + quotedRevIds + ") and revid <= ? " +
-    			"ORDER BY revid DESC LIMIT 1";
-    	String[] args = { Long.toString(docNumericID) };
+        if (revIDs.size() == 0)
+            return null;
+        String docId = rev.getDocId();
+        long docNumericID = getDocNumericID(docId);
+        if (docNumericID <= 0)
+            return null;
+        String quotedRevIds = joinQuoted(revIDs);
+        String sql = "SELECT revid FROM revs " +
+                "WHERE doc_id=? and revid in (" + quotedRevIds + ") and revid <= ? " +
+                "ORDER BY revid DESC LIMIT 1";
+        String[] args = {Long.toString(docNumericID)};
 
-    	Cursor cursor = null;
-    	try {
-    		cursor = sqliteDb.rawQuery(sql, args);
-    		cursor.moveToFirst();
-            if(!cursor.isAfterLast()) {
+        Cursor cursor = null;
+        try {
+            cursor = database.rawQuery(sql, args);
+            cursor.moveToNext();
+            if (!cursor.isAfterLast()) {
                 result = cursor.getString(0);
-    		}
+            }
 
-    	} catch (SQLException e) {
-    		Log.e(CBLDatabase.TAG, "Error getting all revisions of document", e);
-    	} finally {
-    		if(cursor != null) {
-    			cursor.close();
-    		}
-    	}
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error getting all revisions of document", e);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
 
-    	return result;
+        return result;
     }
 
     /**
@@ -1043,9 +1328,9 @@ public class CBLDatabase extends Observable {
 
         List<CBLRevisionInternal> result;
         try {
-            cursor = sqliteDb.rawQuery(sql, args);
+            cursor = database.rawQuery(sql, args);
 
-            cursor.moveToFirst();
+            cursor.moveToNext();
             long lastSequence = 0;
             result = new ArrayList<CBLRevisionInternal>();
             while(!cursor.isAfterLast()) {
@@ -1158,7 +1443,7 @@ public class CBLDatabase extends Observable {
         return makeRevisionHistoryDict(getRevisionHistory(rev));
     }
 
-    public CBLRevisionList changesSince(long lastSeq, CBLChangesOptions options, CBLFilterBlock filter) {
+    public CBLRevisionList changesSince(long lastSeq, CBLChangesOptions options, ReplicationFilter filter) {
         // http://wiki.apache.org/couchdb/HTTP_database_API#Changes
         if(options == null) {
             options = new CBLChangesOptions();
@@ -1179,8 +1464,8 @@ public class CBLDatabase extends Observable {
         CBLRevisionList changes = null;
 
         try {
-            cursor = sqliteDb.rawQuery(sql, args);
-            cursor.moveToFirst();
+            cursor = database.rawQuery(sql, args);
+            cursor.moveToNext();
             changes = new CBLRevisionList();
             long lastDocId = 0;
             while(!cursor.isAfterLast()) {
@@ -1199,7 +1484,7 @@ public class CBLDatabase extends Observable {
                 if(includeDocs) {
                     expandStoredJSONIntoRevisionWithAttachments(cursor.getBlob(5), rev, options.getContentOptions());
                 }
-                if((filter == null) || (filter.filter(rev))) {
+                if((filter == null) || (filter.filter(rev, null))) {
                     changes.add(rev);
                 }
                 cursor.moveToNext();
@@ -1219,38 +1504,28 @@ public class CBLDatabase extends Observable {
         return changes;
     }
 
-    /**
-     * Define or clear a named filter function.
-     *
-     * Filters are used by push replications to choose which documents to send.
-     *
-     * TODO: is the comment below still valid?  It's not in the iOS docs.
-     * These aren't used directly by CBLDatabase, but they're looked up by CBLRouter
-     * when a _changes request has a ?filter parameter.
-     */
-    public void defineFilter(String filterName, CBLFilterBlock filter) {
-        if(filters == null) {
-            filters = new HashMap<String,CBLFilterBlock>();
+
+    public String getDesignDocFunction(String fnName, String key, List<String>outLanguageList) {
+        String[] path = fnName.split("/");
+        if (path.length != 2) {
+            return null;
         }
-        if (filter != null) {
-            filters.put(filterName, filter);
+        String docId = String.format("_design/%s", path[0]);
+        CBLRevisionInternal rev = getDocumentWithIDAndRev(docId, null, EnumSet.noneOf(TDContentOptions.class));
+        if (rev == null) {
+            return null;
         }
-        else {
-            filters.remove(filterName);
+
+        String outLanguage = (String) rev.getPropertyForKey("language");
+        if (outLanguage != null) {
+            outLanguageList.add(outLanguage);
+        } else {
+            outLanguageList.add("javascript");
         }
+        Map<String, Object> container = (Map<String, Object>) rev.getPropertyForKey(key);
+        return (String) container.get(path[1]);
     }
 
-    /**
-     * Returns the existing filter function (block) registered with the given name.
-     * Note that filters are not persistent -- you have to re-register them on every launch.
-     */
-    public CBLFilterBlock getFilter(String filterName) {
-        CBLFilterBlock result = null;
-        if(filters != null) {
-            result = filters.get(filterName);
-        }
-        return result;
-    }
 
     /** VIEWS: **/
 
@@ -1265,25 +1540,11 @@ public class CBLDatabase extends Observable {
         return view;
     }
 
-    /**
-     * Returns a CBLView object for the view with the given name.
-     * (This succeeds even if the view doesn't already exist, but the view won't be added to
-     * the database until the CBLView is assigned a map function.)
-     */
-    public CBLView getView(String name) {
-        CBLView view = null;
-        if(views != null) {
-            view = views.get(name);
-        }
-        if(view != null) {
-            return view;
-        }
-        return registerView(new CBLView(this, name));
-    }
-
 
 
     public List<CBLQueryRow> queryViewNamed(String viewName, CBLQueryOptions options, List<Long> outLastSequence) throws CBLiteException {
+
+        long before = System.currentTimeMillis();
         long lastSequence = 0;
         List<CBLQueryRow> rows = null;
 
@@ -1293,10 +1554,10 @@ public class CBLDatabase extends Observable {
                 throw new CBLiteException(new CBLStatus(CBLStatus.NOT_FOUND));
             }
             lastSequence = view.getLastSequenceIndexed();
-            if (options.getStale() == CBLQuery.CBLStaleness.CBLStaleNever || lastSequence <= 0) {
+            if (options.getStale() == CBLQuery.CBLIndexUpdateMode.NEVER || lastSequence <= 0) {
                 view.updateIndex();
                 lastSequence = view.getLastSequenceIndexed();
-            } else if (options.getStale() == CBLQuery.CBLStaleness.CBLStaleUpdateAfter && lastSequence < getLastSequence()) {
+            } else if (options.getStale() == CBLQuery.CBLIndexUpdateMode.AFTER && lastSequence < getLastSequenceNumber()) {
 
                 new Thread(new Runnable() {
                     @Override
@@ -1320,9 +1581,13 @@ public class CBLDatabase extends Observable {
             // it's a little tricky, so postponing.
             Map<String,Object> allDocsResult = getAllDocs(options);
             rows = (List<CBLQueryRow>) allDocsResult.get("rows");
-            lastSequence = getLastSequence();
+            lastSequence = getLastSequenceNumber();
         }
         outLastSequence.add(lastSequence);
+
+        long delta = System.currentTimeMillis() - before;
+        Log.d(CBLDatabase.TAG, String.format("Query view %s completed in %d milliseconds", viewName, delta));
+
         return rows;
 
     }
@@ -1342,32 +1607,14 @@ public class CBLDatabase extends Observable {
     }
 
 
-    /**
-     * Returns the existing CBLView with the given name, or nil if none.
-     */
-    public CBLView getExistingView(String name) {
-        CBLView view = null;
-        if(views != null) {
-            view = views.get(name);
-        }
-        if(view != null) {
-            return view;
-        }
-        view = new CBLView(this, name);
-        if(view.getViewId() == 0) {
-            return null;
-        }
-
-        return registerView(view);
-    }
 
     public List<CBLView> getAllViews() {
         Cursor cursor = null;
         List<CBLView> result = null;
 
         try {
-            cursor = sqliteDb.rawQuery("SELECT name FROM views", null);
-            cursor.moveToFirst();
+            cursor = database.rawQuery("SELECT name FROM views", null);
+            cursor.moveToNext();
             result = new ArrayList<CBLView>();
             while(!cursor.isAfterLast()) {
                 result.add(getView(cursor.getString(0)));
@@ -1388,7 +1635,7 @@ public class CBLDatabase extends Observable {
         CBLStatus result = new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR);
         try {
             String[] whereArgs = { name };
-            int rowsAffected = sqliteDb.delete("views", "name=?", whereArgs);
+            int rowsAffected = database.delete("views", "name=?", whereArgs);
             if(rowsAffected > 0) {
                 result.setCode(CBLStatus.OK);
             }
@@ -1402,6 +1649,19 @@ public class CBLDatabase extends Observable {
     }
 
 
+    /**
+     * Hack because cursor interface does not support cursor.getColumnIndex("deleted") yet.
+     */
+    public int getDeletedColumnIndex(CBLQueryOptions options) {
+        if (options.isIncludeDocs()) {
+            return 5;
+        }
+        else {
+            return 4;
+        }
+
+    }
+
     public Map<String,Object> getAllDocs(CBLQueryOptions options) throws CBLiteException {
 
         Map<String, Object> result = new HashMap<String, Object>();
@@ -1412,7 +1672,7 @@ public class CBLDatabase extends Observable {
 
         long updateSeq = 0;
         if(options.isUpdateSeq()) {
-            updateSeq = getLastSequence();  // TODO: needs to be atomic with the following SELECT
+            updateSeq = getLastSequenceNumber();  // TODO: needs to be atomic with the following SELECT
         }
 
         StringBuffer sql = new StringBuffer("SELECT revs.doc_id, docid, revid, sequence");
@@ -1428,7 +1688,7 @@ public class CBLDatabase extends Observable {
                 return result;
             }
             String commaSeperatedIds = joinQuotedObjects(options.getKeys());
-            sql.append(String.format(" revs.doc_id IN (SELECT doc_id FROM docs WHERE docid IN (%@)) AND", commaSeperatedIds));
+            sql.append(String.format(" revs.doc_id IN (SELECT doc_id FROM docs WHERE docid IN (%s)) AND", commaSeperatedIds));
         }
         sql.append(" docs.doc_id = revs.doc_id AND current=1");
         if (!options.isIncludeDeletedDocs()) {
@@ -1469,15 +1729,17 @@ public class CBLDatabase extends Observable {
 
         Cursor cursor = null;
         long lastDocID = 0;
+        int totalRows = 0;
         Map<String, CBLQueryRow> docs = new HashMap<String, CBLQueryRow>();
 
 
         try {
-            cursor = sqliteDb.rawQuery(sql.toString(), args.toArray(new String[args.size()]));
+            cursor = database.rawQuery(sql.toString(), args.toArray(new String[args.size()]));
 
-            cursor.moveToFirst();
+            cursor.moveToNext();
             while(!cursor.isAfterLast()) {
 
+                totalRows++;
                 long docNumericID = cursor.getLong(0);
                 if(docNumericID == lastDocID) {
                     cursor.moveToNext();
@@ -1488,16 +1750,19 @@ public class CBLDatabase extends Observable {
                 String docId = cursor.getString(1);
                 String revId = cursor.getString(2);
                 long sequenceNumber = cursor.getLong(3);
-                boolean deleted = options.isIncludeDeletedDocs() && cursor.getInt(cursor.getColumnIndex("deleted"))>0;
+                boolean deleted = options.isIncludeDeletedDocs() && cursor.getInt(getDeletedColumnIndex(options))>0;
                 Map<String, Object> docContents = null;
                 if (options.isIncludeDocs()) {
                     byte[] json = cursor.getBlob(4);
-                    docContents = documentPropertiesFromJSON(json, docId, revId, sequenceNumber, options.getContentOptions());
+                    docContents = documentPropertiesFromJSON(json, docId, revId, deleted, sequenceNumber, options.getContentOptions());
                 }
                 Map<String, Object> value = new HashMap<String, Object>();
                 value.put("rev", revId);
-                value.put("deleted", (deleted ? true : null));
+                if (options.isIncludeDeletedDocs()){
+                    value.put("deleted", (deleted ? true : null));
+                }
                 CBLQueryRow change = new CBLQueryRow(docId, sequenceNumber, docId, value, docContents);
+                change.setDatabase(this);
                 if (options.getKeys() != null) {
                     docs.put(docId, change);
                 } else {
@@ -1530,6 +1795,7 @@ public class CBLDatabase extends Observable {
                                 }
                             }
                             change = new CBLQueryRow((value != null ? docId : null), 0, docId, value, null);
+                            change.setDatabase(this);
                         }
                         rows.add(change);
                     }
@@ -1547,7 +1813,6 @@ public class CBLDatabase extends Observable {
             }
         }
 
-        int totalRows = cursor.getCount();  //??? Is this true, or does it ignore limit/offset?
         result.put("rows", rows);
         result.put("total_rows", totalRows);
         result.put("offset", options.getSkip());
@@ -1573,9 +1838,9 @@ public class CBLDatabase extends Observable {
         String revId = null;
 
         try {
-            cursor = sqliteDb.rawQuery(sql, args);
+            cursor = database.rawQuery(sql, args);
 
-            cursor.moveToFirst();
+            cursor.moveToNext();
             if (!cursor.isAfterLast()) {
                 revId = cursor.getString(0);
                 boolean deleted = cursor.getInt(1)>0;
@@ -1604,159 +1869,6 @@ public class CBLDatabase extends Observable {
     }
 
 
-    /**
-     * OLD DEPRECATED UNUSED
-     *
-     * @param docIDs
-     * @param options
-     * @return
-     */
-    //FIX: This has a lot of code in common with -[CBLView queryWithOptions:status:]. Unify the two!
-    public Map<String,Object> getDocsWithIDs(List<String> docIDs, CBLQueryOptions options) {
-        if(options == null) {
-            options = new CBLQueryOptions();
-        }
-
-        long updateSeq = 0;
-        if(options.isUpdateSeq()) {
-            updateSeq = getLastSequence();  // TODO: needs to be atomic with the following SELECT
-        }
-
-        // Generate the SELECT statement, based on the options:
-        String additionalCols = "";
-        if(options.isIncludeDocs()) {
-            additionalCols = ", json, sequence";
-        }
-        String sql = "SELECT revs.doc_id, docid, revid, deleted" + additionalCols + " FROM revs, docs WHERE";
-
-        if(docIDs != null) {
-            sql += " docid IN (" + joinQuoted(docIDs) + ")";
-        } else {
-            sql += " deleted=0";
-        }
-
-        sql += " AND current=1 AND docs.doc_id = revs.doc_id";
-
-        List<String> argsList = new ArrayList<String>();
-        Object minKey = options.getStartKey();
-        Object maxKey = options.getEndKey();
-        boolean inclusiveMin = true;
-        boolean inclusiveMax = options.isInclusiveEnd();
-        if(options.isDescending()) {
-            minKey = maxKey;
-            maxKey = options.getStartKey();
-            inclusiveMin = inclusiveMax;
-            inclusiveMax = true;
-        }
-
-        if(minKey != null) {
-            assert(minKey instanceof String);
-            if(inclusiveMin) {
-                sql += " AND docid >= ?";
-            } else {
-                sql += " AND docid > ?";
-            }
-            argsList.add((String)minKey);
-        }
-
-        if(maxKey != null) {
-            assert(maxKey instanceof String);
-            if(inclusiveMax) {
-                sql += " AND docid <= ?";
-            }
-            else {
-                sql += " AND docid < ?";
-            }
-            argsList.add((String)maxKey);
-        }
-
-
-        String order = "ASC";
-        if(options.isDescending()) {
-            order = "DESC";
-        }
-
-        sql += " ORDER BY docid " + order + ", revid DESC LIMIT ? OFFSET ?";
-
-        argsList.add(Integer.toString(options.getLimit()));
-        argsList.add(Integer.toString(options.getSkip()));
-        Cursor cursor = null;
-        long lastDocID = 0;
-        List<Map<String,Object>> rows = null;
-
-        try {
-            cursor = sqliteDb.rawQuery(sql, argsList.toArray(new String[argsList.size()]));
-
-            cursor.moveToFirst();
-            rows = new ArrayList<Map<String,Object>>();
-            while(!cursor.isAfterLast()) {
-                long docNumericID = cursor.getLong(0);
-                if(docNumericID == lastDocID) {
-                    cursor.moveToNext();
-                    continue;
-                }
-                lastDocID = docNumericID;
-
-                String docId = cursor.getString(1);
-                String revId = cursor.getString(2);
-                Map<String, Object> docContents = null;
-                boolean deleted = cursor.getInt(3) > 0;
-                if(options.isIncludeDocs() && !deleted) {
-                    byte[] json = cursor.getBlob(4);
-                    long sequence = cursor.getLong(5);
-                    docContents = documentPropertiesFromJSON(json, docId, revId, sequence, options.getContentOptions());
-                }
-
-                Map<String,Object> valueMap = new HashMap<String,Object>();
-                valueMap.put("rev", revId);
-
-                Map<String,Object> change = new HashMap<String, Object>();
-                change.put("id", docId);
-                change.put("key", docId);
-                change.put("value", valueMap);
-                if(docContents != null) {
-                    change.put("doc", docContents);
-                }
-                if(deleted) {
-                    change.put("deleted", true);
-                }
-
-                rows.add(change);
-
-                cursor.moveToNext();
-            }
-        } catch (SQLException e) {
-            Log.e(CBLDatabase.TAG, "Error getting all docs", e);
-            return null;
-        } finally {
-            if(cursor != null) {
-                cursor.close();
-            }
-        }
-
-        int totalRows = cursor.getCount();  //??? Is this true, or does it ignore limit/offset?
-        Map<String, Object> result = new HashMap<String, Object>();
-        result.put("rows", rows);
-        result.put("total_rows", totalRows);
-        result.put("offset", options.getSkip());
-        if(updateSeq != 0) {
-            result.put("update_seq", updateSeq);
-        }
-
-
-        return result;
-    }
-
-    public void addChangeListener(CBLDatabaseChangedFunction listener) {
-        // TODO: implement!
-        throw new RuntimeException("Not implemented");
-    }
-
-    public void removeChangeListener(CBLDatabaseChangedFunction listener) {
-        // TODO: implement!
-        throw new RuntimeException("Not implemented");
-    }
-
     /*************************************************************************************************/
     /*** CBLDatabase+Attachments                                                                    ***/
     /*************************************************************************************************/
@@ -1773,10 +1885,7 @@ public class CBLDatabase extends Observable {
         if(!attachments.storeBlobStream(contentStream, key)) {
             throw new CBLiteException(CBLStatus.INTERNAL_SERVER_ERROR);
         }
-
-
         insertAttachmentForSequenceWithNameAndType(sequence, name, contentType, revpos, key);
-
     }
 
     public void insertAttachmentForSequenceWithNameAndType(long sequence, String name, String contentType, int revpos, CBLBlobKey key) throws CBLiteException {
@@ -1784,11 +1893,13 @@ public class CBLDatabase extends Observable {
             ContentValues args = new ContentValues();
             args.put("sequence", sequence);
             args.put("filename", name);
-            args.put("key", key.getBytes());
+            if (key != null){
+                args.put("key", key.getBytes());
+                args.put("length", attachments.getSizeOfBlob(key));
+            }
             args.put("type", contentType);
-            args.put("length", attachments.getSizeOfBlob(key));
             args.put("revpos", revpos);
-            sqliteDb.insert("attachments", null, args);
+            database.insert("attachments", null, args);
         } catch (SQLException e) {
             Log.e(CBLDatabase.TAG, "Error inserting attachment", e);
             throw new CBLiteException(CBLStatus.INTERNAL_SERVER_ERROR);
@@ -1832,11 +1943,11 @@ public class CBLDatabase extends Observable {
 
         String[] args = { Long.toString(toSeq), name, Long.toString(fromSeq), name };
         try {
-            sqliteDb.execSQL("INSERT INTO attachments (sequence, filename, key, type, length, revpos) " +
+            database.execSQL("INSERT INTO attachments (sequence, filename, key, type, length, revpos) " +
                     "SELECT ?, ?, key, type, length, revpos FROM attachments " +
                     "WHERE sequence=? AND filename=?", args);
-            cursor = sqliteDb.rawQuery("SELECT changes()", null);
-            cursor.moveToFirst();
+            cursor = database.rawQuery("SELECT changes()", null);
+            cursor.moveToNext();
             int rowsUpdated = cursor.getInt(0);
             if(rowsUpdated == 0) {
                 // Oops. This means a glitch in our attachment-management or pull code,
@@ -1868,9 +1979,9 @@ public class CBLDatabase extends Observable {
 
         String[] args = { Long.toString(sequence), filename };
         try {
-            cursor = sqliteDb.rawQuery("SELECT key, type FROM attachments WHERE sequence=? AND filename=?", args);
+            cursor = database.rawQuery("SELECT key, type FROM attachments WHERE sequence=? AND filename=?", args);
 
-            if(!cursor.moveToFirst()) {
+            if(!cursor.moveToNext()) {
                 throw new CBLiteException(CBLStatus.NOT_FOUND);
             }
 
@@ -1884,6 +1995,7 @@ public class CBLDatabase extends Observable {
             }
             else {
                 CBLAttachment result = new CBLAttachment(contentStream, cursor.getString(1));
+                result.setGZipped(attachments.isGZipped(key));
                 return result;
             }
 
@@ -1909,9 +2021,9 @@ public class CBLDatabase extends Observable {
 
         String args[] = { Long.toString(sequence), filename };
         try {
-            cursor = sqliteDb.rawQuery("SELECT key, type, encoding FROM attachments WHERE sequence=? AND filename=?", args);
+            cursor = database.rawQuery("SELECT key, type, encoding FROM attachments WHERE sequence=? AND filename=?", args);
 
-            if(!cursor.moveToFirst()) {
+            if(!cursor.moveToNext()) {
                 throw new CBLiteException(CBLStatus.NOT_FOUND);
             }
 
@@ -1939,9 +2051,9 @@ public class CBLDatabase extends Observable {
 
         String args[] = { Long.toString(sequence) };
         try {
-            cursor = sqliteDb.rawQuery("SELECT filename, key, type, length, revpos FROM attachments WHERE sequence=?", args);
+            cursor = database.rawQuery("SELECT filename, key, type, length, revpos FROM attachments WHERE sequence=?", args);
 
-            if(!cursor.moveToFirst()) {
+            if(!cursor.moveToNext()) {
                 return null;
             }
 
@@ -2061,21 +2173,26 @@ public class CBLDatabase extends Observable {
 
         Map<String, Object> properties = rev.getProperties();
         Map<String, Object> attachmentsFromProps =  (Map<String, Object>) properties.get("_attachments");
-        for (String attachmentKey : attachmentsFromProps.keySet()) {
-            Map<String, Object> attachmentFromProps = (Map<String, Object>) attachmentsFromProps.get(attachmentKey);
-            if (attachmentFromProps.get("follows") != null || attachmentFromProps.get("data") != null) {
-                attachmentFromProps.remove("follows");
-                attachmentFromProps.remove("data");
-                attachmentFromProps.put("stub", true);
-                if (attachmentFromProps.get("revpos") == null) {
-                    attachmentFromProps.put("revpos",rev.getGeneration());
+        if (attachmentsFromProps != null) {
+            for (String attachmentKey : attachmentsFromProps.keySet()) {
+                Map<String, Object> attachmentFromProps = (Map<String, Object>) attachmentsFromProps.get(attachmentKey);
+                if (attachmentFromProps.get("follows") != null || attachmentFromProps.get("data") != null) {
+                    attachmentFromProps.remove("follows");
+                    attachmentFromProps.remove("data");
+                    attachmentFromProps.put("stub", true);
+                    if (attachmentFromProps.get("revpos") == null) {
+                        attachmentFromProps.put("revpos",rev.getGeneration());
+                    }
+                    CBLAttachmentInternal attachmentObject = attachments.get(attachmentKey);
+                    if (attachmentObject != null) {
+                        attachmentFromProps.put("length", attachmentObject.getLength());
+                        if (attachmentObject.getBlobKey() != null){
+                            // case with Large Attachment
+                            attachmentFromProps.put("digest", attachmentObject.getBlobKey().base64Digest());
+                        }
+                    }
+                    attachmentFromProps.put(attachmentKey, attachmentFromProps);
                 }
-                CBLAttachmentInternal attachmentObject = attachments.get(attachmentKey);
-                if (attachmentObject != null) {
-                    attachmentFromProps.put("length", attachmentObject.getLength());
-                    attachmentFromProps.put("digest", attachmentObject.getBlobKey().base64Digest());
-                }
-                attachmentFromProps.put(attachmentKey, attachmentFromProps);
             }
         }
 
@@ -2130,15 +2247,15 @@ public class CBLDatabase extends Observable {
 
     }
 
-    public CBLRevisionInternal updateAttachment(String filename, InputStream contentStream, String contentType, String docID, String oldRevID) throws CBLiteException {
-        return updateAttachment(filename, contentStream, contentType, docID, oldRevID, null);
-    }
 
     /**
      * Updates or deletes an attachment, creating a new document revision in the process.
      * Used by the PUT / DELETE methods called on attachment URLs.
      */
-    public CBLRevisionInternal updateAttachment(String filename, InputStream contentStream, String contentType, String docID, String oldRevID, CBLStatus status) throws CBLiteException {
+    public CBLRevisionInternal updateAttachment(String filename, InputStream contentStream, String contentType, String docID, String oldRevID) throws CBLiteException {
+
+        boolean isSuccessful = false;
+
         if(filename == null || filename.length() == 0 || (contentStream != null && contentType == null) || (oldRevID != null && docID == null) || (contentStream != null && docID == null)) {
             throw new CBLiteException(CBLStatus.BAD_REQUEST);
         }
@@ -2183,7 +2300,7 @@ public class CBLDatabase extends Observable {
             if(oldRevID != null) {
                 // Copy all attachment rows _except_ for the one being updated:
                 String[] args = { Long.toString(newRev.getSequence()), Long.toString(oldRev.getSequence()), filename };
-                sqliteDb.execSQL("INSERT INTO attachments "
+                database.execSQL("INSERT INTO attachments "
                         + "(sequence, filename, key, type, length, revpos) "
                         + "SELECT ?, filename, key, type, length, revpos FROM attachments "
                         + "WHERE sequence=? AND filename != ?", args);
@@ -2196,16 +2313,16 @@ public class CBLDatabase extends Observable {
 
             }
 
-            status.setCode((contentStream != null) ? CBLStatus.CREATED : CBLStatus.OK);
+            isSuccessful = true;
             return newRev;
 
         } catch(SQLException e) {
-            Log.e(TAG, "Error uploading attachment", e);
-            status.setCode(CBLStatus.INTERNAL_SERVER_ERROR);
-            return null;
+            Log.e(TAG, "Error updating attachment", e);
+            throw new CBLiteException(new CBLStatus(CBLStatus.INTERNAL_SERVER_ERROR));
         } finally {
-            endTransaction(status.isSuccessful());
+            endTransaction(isSuccessful);
         }
+
     }
 
 
@@ -2227,7 +2344,7 @@ public class CBLDatabase extends Observable {
         // OPT: Could start after last sequence# we GC'd up to
 
         try {
-            sqliteDb.execSQL("DELETE FROM attachments WHERE sequence IN " +
+            database.execSQL("DELETE FROM attachments WHERE sequence IN " +
                     "(SELECT sequence from revs WHERE json IS null)");
         }
         catch(SQLException e) {
@@ -2237,9 +2354,9 @@ public class CBLDatabase extends Observable {
         // Now collect all remaining attachment IDs and tell the store to delete all but these:
         Cursor cursor = null;
         try {
-            cursor = sqliteDb.rawQuery("SELECT DISTINCT key FROM attachments", null);
+            cursor = database.rawQuery("SELECT DISTINCT key FROM attachments", null);
 
-            cursor.moveToFirst();
+            cursor.moveToNext();
             List<CBLBlobKey> allKeys = new ArrayList<CBLBlobKey>();
             while(!cursor.isAfterLast()) {
                 CBLBlobKey key = new CBLBlobKey(cursor.getBlob(0));
@@ -2305,7 +2422,7 @@ public class CBLDatabase extends Observable {
         try {
             ContentValues args = new ContentValues();
             args.put("docid", docId);
-            rowId = sqliteDb.insert("docs", null, args);
+            rowId = database.insert("docs", null, args);
         } catch (Exception e) {
             Log.e(CBLDatabase.TAG, "Error inserting document id", e);
         }
@@ -2363,7 +2480,7 @@ public class CBLDatabase extends Observable {
 
         byte[] json = null;
         try {
-            json = CBLServer.getObjectMapper().writeValueAsBytes(properties);
+            json = CBLManager.getObjectMapper().writeValueAsBytes(properties);
         } catch (Exception e) {
             Log.e(CBLDatabase.TAG, "Error serializing " + rev + " to JSON", e);
         }
@@ -2371,15 +2488,33 @@ public class CBLDatabase extends Observable {
     }
 
     public void notifyChange(CBLRevisionInternal rev, URL source) {
-        Map<String,Object> changeNotification = new HashMap<String, Object>();
-        changeNotification.put("rev", rev);
-        changeNotification.put("seq", rev.getSequence());
-        if(source != null) {
-            changeNotification.put("source", source);
+
+        // TODO: it is currently sending one change at a time rather than batching them up
+
+        boolean isExternalFixMe = false; // TODO: fix this to have a real value
+
+        DocumentChange change = DocumentChange.tempFactory(rev, source);
+        List<DocumentChange> changes = new ArrayList<DocumentChange>();
+        changes.add(change);
+        ChangeEvent changeEvent = new ChangeEvent(this, isExternalFixMe, changes);
+
+        for (ChangeListener changeListener : changeListeners) {
+            changeListener.changed(changeEvent);
         }
-        setChanged();
-        notifyObservers(changeNotification);
+
+        // TODO: it needs to notify the corresponding instantiated CBLDocument object (if any):
+        /*
+            ios code:
+            for (CBLDatabaseChange* change in changes) {
+            // Notify the corresponding instantiated CBLDocument object (if any):
+            [[self _cachedDocumentWithID: change.documentID] revisionAdded: change];
+            if (change.source != nil)
+                external = YES;
+            }
+         */
+
     }
+
 
     public long insertRevision(CBLRevisionInternal rev, long docNumericID, long parentSequence, boolean current, byte[] data) {
         long rowId = 0;
@@ -2393,7 +2528,7 @@ public class CBLDatabase extends Observable {
             args.put("current", current);
             args.put("deleted", rev.isDeleted());
             args.put("json", data);
-            rowId = sqliteDb.insert("revs", null, args);
+            rowId = database.insert("revs", null, args);
             rev.setSequence(rowId);
         } catch (Exception e) {
             Log.e(CBLDatabase.TAG, "Error inserting revision", e);
@@ -2453,9 +2588,9 @@ public class CBLDatabase extends Observable {
                     additionalWhereClause = "AND current=1";
                 }
 
-                cursor = sqliteDb.rawQuery("SELECT sequence FROM revs WHERE doc_id=? AND revid=? " + additionalWhereClause + " LIMIT 1", args);
+                cursor = database.rawQuery("SELECT sequence FROM revs WHERE doc_id=? AND revid=? " + additionalWhereClause + " LIMIT 1", args);
 
-                if(cursor.moveToFirst()) {
+                if(cursor.moveToNext()) {
                     parentSequence = cursor.getLong(0);
                 }
 
@@ -2478,7 +2613,7 @@ public class CBLDatabase extends Observable {
                 // Make replaced rev non-current:
                 ContentValues updateContent = new ContentValues();
                 updateContent.put("current", 0);
-                sqliteDb.update("revs", updateContent, "sequence=" + parentSequence, null);
+                database.update("revs", updateContent, "sequence=" + parentSequence, null);
             }
             else {
                 // Inserting first revision.
@@ -2506,19 +2641,21 @@ public class CBLDatabase extends Observable {
                     } else {
                         // Doc exists; check whether current winning revision is deleted:
                         String[] args = { Long.toString(docNumericID) };
-                        cursor = sqliteDb.rawQuery("SELECT sequence, deleted FROM revs WHERE doc_id=? and current=1 ORDER BY revid DESC LIMIT 1", args);
+                        cursor = database.rawQuery("SELECT sequence, deleted FROM revs WHERE doc_id=? and current=1 ORDER BY revid DESC LIMIT 1", args);
 
-                        if(cursor.moveToFirst()) {
+                        if(cursor.moveToNext()) {
                             boolean wasAlreadyDeleted = (cursor.getInt(1) > 0);
                             if(wasAlreadyDeleted) {
                                 // Make the deleted revision no longer current:
                                 ContentValues updateContent = new ContentValues();
                                 updateContent.put("current", 0);
-                                sqliteDb.update("revs", updateContent, "sequence=" + cursor.getLong(0), null);
+                                database.update("revs", updateContent, "sequence=" + cursor.getLong(0), null);
                             }
                             else if (!allowConflict) {
-                                // docId already exists, current not deleted, conflict
-                                throw new CBLiteException(CBLStatus.CONFLICT);
+                                String msg = String.format("docId (%s) already exists, current not " +
+                                        "deleted, so conflict.  Did you forget to pass in a previous " +
+                                        "revision ID in the properties being saved?", docId);
+                                throw new CBLiteException(msg, CBLStatus.CONFLICT);
                             }
                         }
                     }
@@ -2592,7 +2729,7 @@ public class CBLDatabase extends Observable {
      */
     Map<String, CBLAttachmentInternal> getAttachmentsFromRevision(CBLRevisionInternal rev) throws CBLiteException {
 
-        Map<String, Object> revAttachments = (Map<String, Object>) rev.getPropertyForKey("_attachmments");
+        Map<String, Object> revAttachments = (Map<String, Object>) rev.getPropertyForKey("_attachments");
         if (revAttachments == null || revAttachments.size() == 0 || rev.isDeleted()) {
             return new HashMap<String, CBLAttachmentInternal>();
         }
@@ -2612,7 +2749,9 @@ public class CBLDatabase extends Observable {
                     throw new CBLiteException(e, CBLStatus.BAD_ENCODING);
                 }
                 attachment.setLength(newContents.length);
-                boolean storedBlob = getAttachments().storeBlob(newContents, attachment.getBlobKey());
+                CBLBlobKey outBlobKey = new CBLBlobKey();
+                boolean storedBlob = getAttachments().storeBlob(newContents, outBlobKey);
+                attachment.setBlobKey(outBlobKey);
                 if (!storedBlob) {
                     throw new CBLiteException(CBLStatus.STATUS_ATTACHMENT_ERROR);
                 }
@@ -2648,7 +2787,12 @@ public class CBLDatabase extends Observable {
                 attachment.setEncodedLength(attachment.getLength());
                 attachment.setLength((Long)attachInfo.get("length"));
             }
-            attachment.setRevpos((Integer)attachInfo.get("revpos"));
+            if (attachInfo.containsKey("revpos")) {
+                attachment.setRevpos((Integer)attachInfo.get("revpos"));
+            }
+            else {
+                attachment.setRevpos(1);
+            }
             attachments.put(name, attachment);
         }
 
@@ -2752,7 +2896,7 @@ public class CBLDatabase extends Observable {
                 args.put("current", 0);
                 String[] whereArgs = { Long.toString(localParentSequence) };
                 try {
-                    sqliteDb.update("revs", args, "sequence=?", whereArgs);
+                    database.update("revs", args, "sequence=?", whereArgs);
                 } catch (SQLException e) {
                     throw new CBLiteException(CBLStatus.INTERNAL_SERVER_ERROR);
                 }
@@ -2760,7 +2904,6 @@ public class CBLDatabase extends Observable {
 
             success = true;
         } catch(SQLException e) {
-            endTransaction(success);
             throw new CBLiteException(CBLStatus.INTERNAL_SERVER_ERROR);
         } finally {
             endTransaction(success);
@@ -2772,34 +2915,7 @@ public class CBLDatabase extends Observable {
 
     /** VALIDATION **/
 
-    /**
-     * Defines or clears a named document validation function.
-     * Before any change to the database, all registered validation functions are called and given a
-     * chance to reject it. (This includes incoming changes from a pull replication.)
-     */
-    public void defineValidation(String name, CBLValidationBlock validationBlock) {
-        if(validations == null) {
-            validations = new HashMap<String, CBLValidationBlock>();
-        }
-        if (validationBlock != null) {
-            validations.put(name, validationBlock);
-        }
-        else {
-            validations.remove(name);
-        }
-    }
 
-    /**
-     * Returns the existing document validation function (block) registered with the given name.
-     * Note that validations are not persistent -- you have to re-register them on every launch.
-     */
-    public CBLValidationBlock getValidation(String name) {
-        CBLValidationBlock result = null;
-        if(validations != null) {
-            result = validations.get(name);
-        }
-        return result;
-    }
 
     public void validateRevision(CBLRevisionInternal newRev, CBLRevisionInternal oldRev) throws CBLiteException {
         if(validations == null || validations.size() == 0) {
@@ -2818,65 +2934,11 @@ public class CBLDatabase extends Observable {
     /*** CBLDatabase+Replication                                                                    ***/
     /*************************************************************************************************/
 
-    //TODO implement missing replication methods
-
-    /**
-     * Get all the replicators associated with this database.
-     *
-     * @return
-     */
-    public List<CBLReplicator> getAllReplications() {
-        return activeReplicators;
-    }
-
-    /**
-     * Creates a replication that will 'push' to a database at the given URL, or returns an existing
-     * such replication if there already is one.
-     *
-     * @param remote
-     * @return
-     */
-    public CBLReplicator push(URL remote) {
-        return getActiveReplicator(remote, true);
-    }
-
-    /**
-     * Creates a replication that will 'pull' from a database at the given URL, or returns an existing
-     * such replication if there already is one.
-     *
-     * @param remote
-     * @return
-     */
-    public CBLReplicator pull(URL remote) {
-        return getActiveReplicator(remote, false);
-    }
-
-    /**
-     * Creates a pair of replications to both pull and push to database at the given URL, or
-     * returns existing replications if there are any.
-     *
-     * @param remote
-     * @param exclusively - this param is ignored!  TODO: fix this
-     * @return An array whose first element is the "pull" replication and second is the "push".
-     */
-    public List<CBLReplicator> replicate(URL remote, boolean exclusively) {
-        CBLReplicator pull;
-        CBLReplicator push;
-        if (remote != null) {
-            pull = pull(remote);
-            push = push(remote);
-            ArrayList<CBLReplicator> result = new ArrayList<CBLReplicator>();
-            result.add(pull);
-            result.add(push);
-            return result;
-        }
-        return null;
-    }
 
     public CBLReplicator getActiveReplicator(URL remote, boolean push) {
         if(activeReplicators != null) {
             for (CBLReplicator replicator : activeReplicators) {
-                if(replicator.getRemote().equals(remote) && replicator.isPush() == push  && replicator.isRunning()) {
+                if(replicator.getRemoteUrl().equals(remote) && replicator.isPull() == !push && replicator.isRunning()) {
                     return replicator;
                 }
             }
@@ -2901,8 +2963,7 @@ public class CBLDatabase extends Observable {
         return null;
     }
 
-
-
+    @InterfaceAudience.Private
     public CBLReplicator getReplicator(URL remote, HttpClientFactory httpClientFactory, boolean push, boolean continuous, ScheduledExecutorService workExecutor) {
         CBLReplicator result = getActiveReplicator(remote, push);
         if(result != null) {
@@ -2922,8 +2983,8 @@ public class CBLDatabase extends Observable {
         String result = null;
         try {
             String[] args = { url.toExternalForm(), Integer.toString(push ? 1 : 0) };
-            cursor = sqliteDb.rawQuery("SELECT last_sequence FROM replicators WHERE remote=? AND push=?", args);
-            if(cursor.moveToFirst()) {
+            cursor = database.rawQuery("SELECT last_sequence FROM replicators WHERE remote=? AND push=?", args);
+            if(cursor.moveToNext()) {
                 result = cursor.getString(0);
             }
         } catch (SQLException e) {
@@ -2942,7 +3003,7 @@ public class CBLDatabase extends Observable {
         values.put("remote", url.toExternalForm());
         values.put("push", push);
         values.put("last_sequence", lastSequence);
-        long newId = sqliteDb.insertWithOnConflict("replicators", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        long newId = database.insertWithOnConflict("replicators", null, values, SQLiteStorageEngine.CONFLICT_REPLACE);
         return (newId == -1);
     }
 
@@ -2996,8 +3057,8 @@ public class CBLDatabase extends Observable {
 
         Cursor cursor = null;
         try {
-            cursor = sqliteDb.rawQuery(sql, null);
-            cursor.moveToFirst();
+            cursor = database.rawQuery(sql, null);
+            cursor.moveToNext();
             while(!cursor.isAfterLast()) {
                 CBLRevisionInternal rev = touchRevs.revWithDocIdAndRevId(cursor.getString(0), cursor.getString(1));
 
@@ -3022,40 +3083,11 @@ public class CBLDatabase extends Observable {
     /*** CBLDatabase+LocalDocs                                                                      ***/
     /*************************************************************************************************/
 
-    /**
-     * Returns the contents of the local document with the given ID, or nil if none exists.
-     */
-    public Map<String, Object> getLocalDocument(String documentId) {
-        return dbInternal.getLocalDocument(makeLocalDocumentId(documentId), null).getProperties();
-    }
 
     static String makeLocalDocumentId(String documentId) {
         return String.format("_local/%s", documentId);
     }
 
-    /**
-     * Sets the contents of the local document with the given ID. Unlike CouchDB, no revision-ID
-     * checking is done; the put always succeeds. If the properties dictionary is nil, the document
-     * will be deleted.
-     */
-    public boolean putLocalDocument(Map<String, Object> properties, String id) throws CBLiteException {
-        // TODO: there was some code in the iOS implementation equivalent that I did not know if needed
-        CBLRevisionInternal prevRev = dbInternal.getLocalDocument(id, null);
-        if (prevRev == null && properties == null) {
-            return false;
-        }
-        return putLocalRevision(prevRev, prevRev.getRevId()) != null;
-    }
-
-    /**
-     * Don't use this method!  This should be considered a private API for the Couchbase Lite
-     * library to use internally.
-     *
-     * @return
-     */
-    public CBLDatabaseInternal getDbInternal() {
-        return dbInternal;
-    }
 
     public CBLRevisionInternal putLocalRevision(CBLRevisionInternal revision, String prevRevID) throws CBLiteException  {
         String docID = revision.getDocId();
@@ -3078,7 +3110,7 @@ public class CBLDatabase extends Observable {
                 values.put("json", json);
                 String[] whereArgs = { docID, prevRevID };
                 try {
-                    int rowsUpdated = sqliteDb.update("localdocs", values, "docid=? AND revid=?", whereArgs);
+                    int rowsUpdated = database.update("localdocs", values, "docid=? AND revid=?", whereArgs);
                     if(rowsUpdated == 0) {
                         throw new CBLiteException(CBLStatus.CONFLICT);
                     }
@@ -3092,7 +3124,7 @@ public class CBLDatabase extends Observable {
                 values.put("revid", newRevID);
                 values.put("json", json);
                 try {
-                    sqliteDb.insertWithOnConflict("localdocs", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+                    database.insertWithOnConflict("localdocs", null, values, SQLiteStorageEngine.CONFLICT_IGNORE);
                 } catch (SQLException e) {
                     throw new CBLiteException(e, CBLStatus.INTERNAL_SERVER_ERROR);
                 }
@@ -3101,30 +3133,11 @@ public class CBLDatabase extends Observable {
         }
         else {
             // DELETE:
-            dbInternal.deleteLocalDocument(docID, prevRevID);
+            deleteLocalDocument(docID, prevRevID);
             return revision;
         }
     }
 
-    /**
-     * Deletes the local document with the given ID.
-     */
-    public boolean deleteLocalDocument(String id) throws CBLiteException {
-        CBLRevisionInternal prevRev = dbInternal.getLocalDocument(id, null);
-        if (prevRev == null) {
-            return false;
-        }
-        dbInternal.deleteLocalDocument(id, prevRev.getRevId());
-        return true;
-    }
-
-    /**
-     * Returns a query that matches all documents in the database.
-     * This is like querying an imaginary view that emits every document's ID as a key.
-     */
-    public CBLQuery queryAllDocuments() {
-        return new CBLQuery(this, (CBLView)null);
-    }
 
     /**
      * Creates a one-shot query with the given map function. This is equivalent to creating an
@@ -3132,8 +3145,66 @@ public class CBLDatabase extends Observable {
      * development, but in general this is inefficient if this map will be used more than once,
      * because the entire view has to be regenerated from scratch every time.
      */
-    public CBLQuery slowQuery(CBLMapFunction map) {
+    public CBLQuery slowQuery(CBLMapper map) {
         return new CBLQuery(this, map);
+    }
+
+
+    CBLRevisionInternal getParentRevision(CBLRevisionInternal rev) {
+
+        // First get the parent's sequence:
+        long seq = rev.getSequence();
+        if (seq > 0) {
+            seq = longForQuery("SELECT parent FROM revs WHERE sequence=?", new String[] { Long.toString(seq) });
+        } else {
+            long docNumericID = getDocNumericID(rev.getDocId());
+            if (docNumericID <= 0) {
+                return null;
+            }
+            String[] args = new String[] { Long.toString(docNumericID), rev.getRevId() } ;
+            seq = longForQuery("SELECT parent FROM revs WHERE doc_id=? and revid=?", args);
+        }
+
+        if (seq == 0) {
+            return null;
+        }
+
+        // Now get its revID and deletion status:
+        CBLRevisionInternal result = null;
+
+        String[] args = { Long.toString(seq) };
+        String queryString = "SELECT revid, deleted FROM revs WHERE sequence=?";
+        Cursor cursor = null;
+
+        try {
+            cursor = database.rawQuery(queryString, args);
+            if (cursor.moveToNext()) {
+                String revId = cursor.getString(0);
+                boolean deleted = (cursor.getInt(1) > 0);
+                result = new CBLRevisionInternal(rev.getDocId(), revId, deleted, this);
+                result.setSequence(seq);
+            }
+        } finally {
+            cursor.close();
+        }
+        return result;
+    }
+
+
+    long longForQuery(String sqlQuery, String[] args) throws SQLException {
+        Cursor cursor = null;
+        long result = 0;
+        try {
+            cursor = database.rawQuery(sqlQuery, args);
+            if(cursor.moveToNext()) {
+                result = cursor.getLong(0);
+            }
+        } finally {
+            if(cursor != null) {
+                cursor.close();
+            }
+        }
+        return result;
     }
 
     /**
@@ -3145,9 +3216,9 @@ public class CBLDatabase extends Observable {
     Map<String, Object> purgeRevisions(final Map<String, List<String>> docsToRevs) {
 
         final Map<String, Object> result = new HashMap<String, Object>();
-        inTransaction(new CBLDatabaseFunction() {
+        runInTransaction(new TransactionTask() {
             @Override
-            public boolean performFunction() {
+            public boolean run() {
                 for (String docID : docsToRevs.keySet()) {
                     long docNumericID = getDocNumericID(docID);
                     if (docNumericID == -1) {
@@ -3157,33 +3228,29 @@ public class CBLDatabase extends Observable {
                     List<String> revIDs = (List<String>) docsToRevs.get(docID);
                     if (revIDs == null) {
                         return false;
-                    }
-                    else if (revIDs.size() == 0) {
+                    } else if (revIDs.size() == 0) {
                         revsPurged = new ArrayList<String>();
-                    }
-                    else if (revIDs.contains("*")) {
+                    } else if (revIDs.contains("*")) {
                         // Delete all revisions if magic "*" revision ID is given:
                         try {
-                            String[] args = { Long.toString(docNumericID) };
-                            sqliteDb.execSQL("DELETE FROM revs WHERE doc_id=?", args);
-                        }
-                        catch(SQLException e) {
+                            String[] args = {Long.toString(docNumericID)};
+                            database.execSQL("DELETE FROM revs WHERE doc_id=?", args);
+                        } catch (SQLException e) {
                             Log.e(CBLDatabase.TAG, "Error deleting revisions", e);
                             return false;
                         }
                         revsPurged.add("*");
-                    }
-                    else {
+                    } else {
                         // Iterate over all the revisions of the doc, in reverse sequence order.
                         // Keep track of all the sequences to delete, i.e. the given revs and ancestors,
                         // but not any non-given leaf revs or their ancestors.
                         Cursor cursor = null;
 
                         try {
-                            String[] args = { Long.toString(docNumericID) };
+                            String[] args = {Long.toString(docNumericID)};
                             String queryString = "SELECT revid, sequence, parent FROM revs WHERE doc_id=? ORDER BY sequence DESC";
-                            cursor = sqliteDb.rawQuery(queryString, args);
-                            if (!cursor.moveToFirst()) {
+                            cursor = database.rawQuery(queryString, args);
+                            if (!cursor.moveToNext()) {
                                 Log.w(CBLDatabase.TAG, "No results for query: " + queryString);
                                 return false;
                             }
@@ -3191,7 +3258,7 @@ public class CBLDatabase extends Observable {
                             Set<Long> seqsToPurge = new HashSet<Long>();
                             Set<Long> seqsToKeep = new HashSet<Long>();
                             Set<String> revsToPurge = new HashSet<String>();
-                            while(!cursor.isAfterLast()) {
+                            while (!cursor.isAfterLast()) {
 
                                 String revID = cursor.getString(0);
                                 long sequence = cursor.getLong(1);
@@ -3203,8 +3270,7 @@ public class CBLDatabase extends Observable {
                                     if (parent > 0) {
                                         seqsToPurge.add(parent);
                                     }
-                                }
-                                else {
+                                } else {
                                     // Keep it and its parent:
                                     seqsToPurge.remove(sequence);
                                     revsToPurge.remove(revID);
@@ -3221,22 +3287,19 @@ public class CBLDatabase extends Observable {
                                 String seqsToPurgeList = TextUtils.join(",", seqsToPurge);
                                 String sql = String.format("DELETE FROM revs WHERE sequence in (%s)", seqsToPurgeList);
                                 try {
-                                    sqliteDb.execSQL(sql);
-                                }
-                                catch(SQLException e) {
+                                    database.execSQL(sql);
+                                } catch (SQLException e) {
                                     Log.e(CBLDatabase.TAG, "Error deleting revisions via: " + sql, e);
                                     return false;
                                 }
                             }
                             revsPurged.addAll(revsToPurge);
 
-                        }
-                        catch(SQLException e) {
+                        } catch (SQLException e) {
                             Log.e(CBLDatabase.TAG, "Error getting revisions", e);
                             return false;
-                        }
-                        finally {
-                            if(cursor != null) {
+                        } finally {
+                            if (cursor != null) {
                                 cursor.close();
                             }
                         }
@@ -3255,21 +3318,130 @@ public class CBLDatabase extends Observable {
 
     }
 
-    /**
-     * Returns the currently registered filter compiler (nil by default).
-     */
-    public Map<String, CBLFilterCompiler> getFilterCompiler() {
-        // TODO: the filter compiler currently ignored
-        return filterCompiler;
+    protected boolean replaceUUIDs() {
+        String query = "UPDATE INFO SET value='"+ CBLMisc.TDCreateUUID()+"' where key = 'privateUUID';";
+        try {
+            database.execSQL(query);
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error updating UUIDs", e);
+            return false;
+        }
+        query = "UPDATE INFO SET value='"+CBLMisc.TDCreateUUID()+"' where key = 'publicUUID';";
+        try {
+            database.execSQL(query);
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error updating UUIDs", e);
+            return false;
+        }
+        return true;
+    }
+
+    @InterfaceAudience.Private
+    public CBLRevisionInternal getLocalDocument(String docID, String revID) {
+
+        CBLRevisionInternal result = null;
+        Cursor cursor = null;
+        try {
+            String[] args = { docID };
+            cursor = database.rawQuery("SELECT revid, json FROM localdocs WHERE docid=?", args);
+            if(cursor.moveToNext()) {
+                String gotRevID = cursor.getString(0);
+                if(revID != null && (!revID.equals(gotRevID))) {
+                    return null;
+                }
+                byte[] json = cursor.getBlob(1);
+                Map<String,Object> properties = null;
+                try {
+                    properties = CBLManager.getObjectMapper().readValue(json, Map.class);
+                    properties.put("_id", docID);
+                    properties.put("_rev", gotRevID);
+                    result = new CBLRevisionInternal(docID, gotRevID, false, this);
+                    result.setProperties(properties);
+                } catch (Exception e) {
+                    Log.w(CBLDatabase.TAG, "Error parsing local doc JSON", e);
+                    return null;
+                }
+
+            }
+            return result;
+        } catch (SQLException e) {
+            Log.e(CBLDatabase.TAG, "Error getting local document", e);
+            return null;
+        } finally {
+            if(cursor != null) {
+                cursor.close();
+            }
+        }
+
+    }
+
+    public void deleteLocalDocument(String docID, String revID) throws CBLiteException {
+        if(docID == null) {
+            throw new CBLiteException(CBLStatus.BAD_REQUEST);
+        }
+        if(revID == null) {
+            // Didn't specify a revision to delete: 404 or a 409, depending
+            if (getLocalDocument(docID, null) != null) {
+                throw new CBLiteException(CBLStatus.CONFLICT);
+            }
+            else {
+                throw new CBLiteException(CBLStatus.NOT_FOUND);
+            }
+        }
+        String[] whereArgs = { docID, revID };
+        try {
+            int rowsDeleted = database.delete("localdocs", "docid=? AND revid=?", whereArgs);
+            if(rowsDeleted == 0) {
+                if (getLocalDocument(docID, null) != null) {
+                    throw new CBLiteException(CBLStatus.CONFLICT);
+                }
+                else {
+                    throw new CBLiteException(CBLStatus.NOT_FOUND);
+                }
+            }
+        } catch (SQLException e) {
+            throw new CBLiteException(e, CBLStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
-     * Registers an object that can compile source code into executable filter blocks.
+     * Set the database's name.
      */
-    public void setFilterCompiler(Map<String, CBLFilterCompiler> filterCompiler) {
-        // TODO: the filter compiler currently ignored
-        this.filterCompiler = filterCompiler;
+    @InterfaceAudience.Private
+    public void setName(String name) {
+        this.name = name;
     }
+
+    public static class ChangeEvent {
+
+        private CBLDatabase source;
+        private boolean isExternal;
+        private List<DocumentChange> changes;
+
+        public ChangeEvent(CBLDatabase source, boolean isExternal, List<DocumentChange> changes) {
+            this.source = source;
+            this.isExternal = isExternal;
+            this.changes = changes;
+        }
+
+        public CBLDatabase getSource() {
+            return source;
+        }
+
+        public boolean isExternal() {
+            return isExternal;
+        }
+
+        public List<DocumentChange> getChanges() {
+            return changes;
+        }
+
+    }
+
+    public static interface ChangeListener {
+        public void changed(ChangeEvent event);
+    }
+
 
 }
 
@@ -3314,5 +3486,7 @@ class TDValidationContextImpl implements CBLValidationContext {
     public void setErrorMessage(String message) {
         this.errorMessage = message;
     }
+
+
 
 }

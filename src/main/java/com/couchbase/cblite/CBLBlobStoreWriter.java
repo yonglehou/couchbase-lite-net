@@ -1,8 +1,7 @@
 package com.couchbase.cblite;
 
-import android.util.Log;
-
 import com.couchbase.cblite.support.Base64;
+import com.couchbase.cblite.util.Log;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -88,6 +87,12 @@ public class CBLBlobStoreWriter {
             }
         } catch (IOException e) {
             throw new RuntimeException("Unable to read from stream.", e);
+        } finally {
+            try {
+                inputStream.close();
+            } catch (IOException e) {
+                Log.w(CBLDatabase.TAG, "Exception closing input stream", e);
+            }
         }
     }
 

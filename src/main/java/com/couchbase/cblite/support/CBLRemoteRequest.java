@@ -1,9 +1,10 @@
 package com.couchbase.cblite.support;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.util.concurrent.ScheduledExecutorService;
+import android.net.Uri;
+
+import com.couchbase.cblite.CBLDatabase;
+import com.couchbase.cblite.CBLManager;
+import com.couchbase.cblite.util.Log;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpException;
@@ -33,10 +34,11 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HttpContext;
 
-import android.util.Log;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.util.concurrent.ScheduledExecutorService;
 
-import com.couchbase.cblite.CBLDatabase;
-import com.couchbase.cblite.CBLServer;
 
 public class CBLRemoteRequest implements Runnable {
 
@@ -94,7 +96,7 @@ public class CBLRemoteRequest implements Runnable {
         if (body != null && request instanceof HttpEntityEnclosingRequestBase) {
             byte[] bodyBytes = null;
             try {
-                bodyBytes = CBLServer.getObjectMapper().writeValueAsBytes(body);
+                bodyBytes = CBLManager.getObjectMapper().writeValueAsBytes(body);
             } catch (Exception e) {
                 Log.e(CBLDatabase.TAG, "Error serializing body of request", e);
             }
@@ -131,7 +133,7 @@ public class CBLRemoteRequest implements Runnable {
                     InputStream stream = null;
                     try {
                         stream = temp.getContent();
-                        fullBody = CBLServer.getObjectMapper().readValue(stream,
+                        fullBody = CBLManager.getObjectMapper().readValue(stream,
                                 Object.class);
                     } finally {
                         try {
@@ -158,7 +160,7 @@ public class CBLRemoteRequest implements Runnable {
             if (url.getUserInfo().contains(":") && !url.getUserInfo().trim().equals(":")) {
                 String[] userInfoSplit = url.getUserInfo().split(":");
                 final Credentials creds = new UsernamePasswordCredentials(
-                        userInfoSplit[0], userInfoSplit[1]);
+                        Uri.decode(userInfoSplit[0]), Uri.decode(userInfoSplit[1]));
                 if (httpClient instanceof DefaultHttpClient) {
                     DefaultHttpClient dhc = (DefaultHttpClient) httpClient;
 

@@ -1,15 +1,16 @@
 package com.couchbase.cblite.testapp.tests;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import junit.framework.Assert;
-import android.util.Log;
-
+import com.couchbase.cblite.CBLStatus;
 import com.couchbase.cblite.CBLiteException;
 import com.couchbase.cblite.internal.CBLBody;
 import com.couchbase.cblite.internal.CBLRevisionInternal;
-import com.couchbase.cblite.CBLStatus;
+import com.couchbase.cblite.util.Log;
+
+import junit.framework.Assert;
+
+import java.util.HashMap;
+import java.util.Map;
+
 
 public class LocalDocs extends CBLiteTestCase {
 
@@ -34,7 +35,7 @@ public class LocalDocs extends CBLiteTestCase {
         Assert.assertTrue(rev1.getRevId().startsWith("1-"));
 
         //read it back
-        CBLRevisionInternal readRev = database.getDbInternal().getLocalDocument(rev1.getDocId(), null);
+        CBLRevisionInternal readRev = database.getLocalDocument(rev1.getDocId(), null);
         Assert.assertNotNull(readRev);
         Map<String,Object> readRevProps = readRev.getProperties();
         Assert.assertEquals(rev1.getDocId(), readRev.getProperties().get("_id"));
@@ -53,7 +54,7 @@ public class LocalDocs extends CBLiteTestCase {
         Assert.assertTrue(rev2.getRevId().startsWith("2-"));
 
         //read it back
-        readRev = database.getDbInternal().getLocalDocument(rev2.getDocId(), null);
+        readRev = database.getLocalDocument(rev2.getDocId(), null);
         Assert.assertNotNull(readRev);
         Assert.assertEquals(userProperties(readRev.getProperties()), userProperties(body.getProperties()));
 
@@ -96,7 +97,7 @@ public class LocalDocs extends CBLiteTestCase {
 
 
         // Read it back (should fail):
-        readRev = database.getDbInternal().getLocalDocument(revD.getDocId(), null);
+        readRev = database.getLocalDocument(revD.getDocId(), null);
         Assert.assertNull(readRev);
     }
 
