@@ -23,12 +23,12 @@ using System;
 using System.Collections.Generic;
 using Android.Net;
 using Android.Util;
-using Apache.Http.Entity.Mime;
 using Couchbase;
 using Couchbase.Auth;
 using Couchbase.Internal;
 using Couchbase.Support;
 using Org.Apache.Http.Client;
+using Org.Apache.Http.Entity.Mime;
 using Sharpen;
 
 namespace Couchbase.Replicator

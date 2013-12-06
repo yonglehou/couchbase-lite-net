@@ -20,10 +20,10 @@
  */
 
 using System;
-using Apache.Http.Entity.Mime;
 using Couchbase.Support;
 using Org.Apache.Http.Client;
 using Org.Apache.Http.Client.Methods;
+using Org.Apache.Http.Entity.Mime;
 using Sharpen;
 
 namespace Couchbase.Support
@@ -44,7 +44,7 @@ namespace Couchbase.Support
 		{
 			HttpClient httpClient = clientFactory.GetHttpClient();
 			PreemptivelySetAuthCredentials(httpClient);
-			HttpUriRequest request = null;
+			IHttpUriRequest request = null;
 			if (Sharpen.Runtime.EqualsIgnoreCase(method, "PUT"))
 			{
 				HttpPut putRequest = new HttpPut(url.ToExternalForm());

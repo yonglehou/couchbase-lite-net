@@ -31,7 +31,6 @@ using Org.Apache.Http.Client.Methods;
 using Org.Apache.Http.Client.Protocol;
 using Org.Apache.Http.Conn;
 using Org.Apache.Http.Entity;
-using Org.Apache.Http.Impl.Auth;
 using Org.Apache.Http.Impl.Client;
 using Org.Apache.Http.Protocol;
 using Sharpen;
@@ -68,16 +67,16 @@ namespace Couchbase.Support
 		{
 			HttpClient httpClient = clientFactory.GetHttpClient();
 			ClientConnectionManager manager = httpClient.GetConnectionManager();
-			HttpUriRequest request = CreateConcreteRequest();
+			IHttpUriRequest request = CreateConcreteRequest();
 			PreemptivelySetAuthCredentials(httpClient);
 			request.AddHeader("Accept", "multipart/related, application/json");
 			SetBody(request);
 			ExecuteRequest(httpClient, request);
 		}
 
-		protected internal virtual HttpUriRequest CreateConcreteRequest()
+		protected internal virtual IHttpUriRequest CreateConcreteRequest()
 		{
-			HttpUriRequest request = null;
+			IHttpUriRequest request = null;
 			if (Sharpen.Runtime.EqualsIgnoreCase(method, "GET"))
 			{
 				request = new HttpGet(url.ToExternalForm());
@@ -99,7 +98,7 @@ namespace Couchbase.Support
 			return request;
 		}
 
-		private void SetBody(HttpUriRequest request)
+		private void SetBody(IHttpUriRequest request)
 		{
 			// set body if appropriate
 			if (body != null && request is HttpEntityEnclosingRequestBase)
@@ -119,7 +118,7 @@ namespace Couchbase.Support
 			}
 		}
 
-		protected internal virtual void ExecuteRequest(HttpClient httpClient, HttpUriRequest
+		protected internal virtual void ExecuteRequest(HttpClient httpClient, IHttpUriRequest
 			 request)
 		{
 			object fullBody = null;
@@ -193,7 +192,7 @@ namespace Couchbase.Support
 					if (httpClient is DefaultHttpClient)
 					{
 						DefaultHttpClient dhc = (DefaultHttpClient)httpClient;
-						HttpRequestInterceptor preemptiveAuth = new _HttpRequestInterceptor_165(creds);
+						IHttpRequestInterceptor preemptiveAuth = new _IHttpRequestInterceptor_165(creds);
 						dhc.AddRequestInterceptor(preemptiveAuth, 0);
 					}
 				}
@@ -205,16 +204,16 @@ namespace Couchbase.Support
 			}
 		}
 
-		private sealed class _HttpRequestInterceptor_165 : HttpRequestInterceptor
+		private sealed class _IHttpRequestInterceptor_165 : IHttpRequestInterceptor
 		{
-			public _HttpRequestInterceptor_165(Credentials creds)
+			public _IHttpRequestInterceptor_165(Credentials creds)
 			{
 				this.creds = creds;
 			}
 
 			/// <exception cref="Org.Apache.Http.HttpException"></exception>
 			/// <exception cref="System.IO.IOException"></exception>
-			public void Process(HttpRequest request, HttpContext context)
+			public void Process(IHttpRequest request, HttpContext context)
 			{
 				AuthState authState = (AuthState)context.GetAttribute(ClientContext.TargetAuthState
 					);

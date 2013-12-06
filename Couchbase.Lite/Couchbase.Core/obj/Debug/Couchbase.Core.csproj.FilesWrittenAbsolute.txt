@@ -1,0 +1,2 @@
+/Users/zgramana/Xamarin/Projects/couchbase-lite-net/Couchbase.Lite/Couchbase.Core/obj/Debug/.NETFramework,Version=v4.5.AssemblyAttribute.cs
+/Users/zgramana/Xamarin/Projects/couchbase-lite-net/Couchbase.Lite/Couchbase.Core/bin/Debug/ICSharpCode.SharpZipLib.dll

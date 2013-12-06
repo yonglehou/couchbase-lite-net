@@ -48,12 +48,12 @@ namespace Couchbase.Support
 		{
 			HttpClient httpClient = clientFactory.GetHttpClient();
 			PreemptivelySetAuthCredentials(httpClient);
-			HttpUriRequest request = CreateConcreteRequest();
+			IHttpUriRequest request = CreateConcreteRequest();
 			request.AddHeader("Accept", "*/*");
 			ExecuteRequest(httpClient, request);
 		}
 
-		protected internal override void ExecuteRequest(HttpClient httpClient, HttpUriRequest
+		protected internal override void ExecuteRequest(HttpClient httpClient, IHttpUriRequest
 			 request)
 		{
 			object fullBody = null;

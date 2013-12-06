@@ -31,7 +31,6 @@ using Org.Apache.Http.Auth;
 using Org.Apache.Http.Client;
 using Org.Apache.Http.Client.Methods;
 using Org.Apache.Http.Client.Protocol;
-using Org.Apache.Http.Impl.Auth;
 using Org.Apache.Http.Impl.Client;
 using Org.Apache.Http.Protocol;
 using Org.Codehaus.Jackson;
@@ -57,7 +56,7 @@ namespace Couchbase.Replicator.Changetracker
 
 		private bool running = false;
 
-		private HttpUriRequest request;
+		private IHttpUriRequest request;
 
 		private string filterName;
 
@@ -199,7 +198,7 @@ namespace Couchbase.Replicator.Changetracker
 						if (httpClient is DefaultHttpClient)
 						{
 							DefaultHttpClient dhc = (DefaultHttpClient)httpClient;
-							HttpRequestInterceptor preemptiveAuth = new _HttpRequestInterceptor_165(creds);
+							IHttpRequestInterceptor preemptiveAuth = new _IHttpRequestInterceptor_165(creds);
 							dhc.AddRequestInterceptor(preemptiveAuth, 0);
 						}
 					}
@@ -286,16 +285,16 @@ namespace Couchbase.Replicator.Changetracker
 			Log.V(CBLDatabase.Tag, "Change tracker run loop exiting");
 		}
 
-		private sealed class _HttpRequestInterceptor_165 : HttpRequestInterceptor
+		private sealed class _IHttpRequestInterceptor_165 : IHttpRequestInterceptor
 		{
-			public _HttpRequestInterceptor_165(Credentials creds)
+			public _IHttpRequestInterceptor_165(Credentials creds)
 			{
 				this.creds = creds;
 			}
 
 			/// <exception cref="Org.Apache.Http.HttpException"></exception>
 			/// <exception cref="System.IO.IOException"></exception>
-			public void Process(HttpRequest request, HttpContext context)
+			public void Process(IHttpRequest request, HttpContext context)
 			{
 				AuthState authState = (AuthState)context.GetAttribute(ClientContext.TargetAuthState
 					);

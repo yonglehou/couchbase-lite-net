@@ -6,8 +6,12 @@
 
 -namespaceMapping com.couchbase.cblite Couchbase
 -namespaceMapping com.couchbase.touchdb Couchbase
--namespaceMapping org.apache.http.entity.mime Apache.Http.Entity.Mime
+-namespaceMapping org.apache.http.authentication Org.Apache.Http.Authentication
+-namespaceMapping org.apache.http.impl.auth Org.Apache.Http.Impl.Client
+-namespaceMapping org.apache.http.util Org.Apache.Http.Util
+-namespaceMapping org.apache.http Org.Apache.Http
 -namespaceMapping org.codehaus.jackson.map Newtonsoft.Json
+-namespaceMapping org.apache.http.entity.mime Org.Apache.Http.Entity.Mime
 
 -methodMapping java.util.Iterator.hasNext HasNext
 -methodMapping java.util.Iterator.next Next
@@ -15,6 +19,9 @@
 -typeMapping java.util.Comparator System.Collections.IEnumerator   
 -typeMapping java.util.ArrayList System.Collections.ArrayList 
 -typeMapping org.codehaus.jackson.map.ObjectMapper JsonConvert
+-typeMapping org.apache.http.client.methods.HttpUriRequest Org.Apache.Http.Client.Methods.IHttpUriRequest
+-typeMapping org.apache.http.HttpRequestInterceptor Org.Apache.Http.IHttpRequestInterceptor
+-typeMapping org.apache.http.HttpRequest Org.Apache.Http.IHttpRequest
 
 -methodMapping java.util.List.addAll AddRange 
 -methodMapping java.util.AbstractList.addAll AddRange 
@@ -98,6 +105,8 @@
 -methodMapping java.util.concurrent.Semaphore.acquire WaitOne
 -methodMapping java.lang.ProcessBuilder.command SetCommand
 -methodMapping java.io.IOException.IOException(java.lang.Throwable) Sharpen.Extensions.CreateIOException
+-methodMapping com.couchbase.cblite.support.Base64.Decode System.Convert.FromBase64String
+-methodMapping com.couchbase.cblite.support.Base64.Encode System.Convert.ToBase64String
 -fieldMapping java.util.Locale.US InvariantCulture
 -fieldMapping java.util.Locale.GERMAN Sharpen.Extensions.GetGermanCulture()
 -fieldMapping java.util.Locale.ENGLISH Sharpen.Extensions.GetEnglishCulture()
@@ -141,6 +150,11 @@
 -typeMapping java.util.concurrent.Semaphore System.Threading.Semaphore
 -typeMapping java.util.Enumeration System.Collections.Generic.IEnumeration
 -typeMapping java.lang.ProcessBuilder System.Diagnostics.ProcessStartInfo
+-typeMapping java.util.Observable Sharpen.Observable
+-typeMapping java.util.Observer Sharpen.Observer
+-typeMapping java.util.Observer Sharpen.Observer
+-typeMapping com.couchbase.cblite.Base64 System.Convert
+
 -propertyMapping java.lang.Class.getSimpleName Name
 -propertyMapping java.nio.charset.Charset.defaultCharset Default
 -propertyMapping java.util.Locale.getDefault CurrentCulture
