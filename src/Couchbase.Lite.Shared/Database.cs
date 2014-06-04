@@ -1330,14 +1330,25 @@ PRAGMA user_version = 3;";
                     
                 lastSequence = view.LastSequenceIndexed;
                 if (options.GetStale () == IndexUpdateMode.Before || lastSequence <= 0) {
-                    view.UpdateIndex ();
-                    lastSequence = view.LastSequenceIndexed;
+                    var updateTask = Manager.RunAsync(()=>{
+                        try
+                        {
+                            view.UpdateIndex ();
+                            lastSequence = view.LastSequenceIndexed;
+                        }
+                        catch (CouchbaseLiteException e)
+                        {
+                            Log.E(Database.Tag, "Error updating view index on background thread", e);
+                        }
+                        return null;
+                    });
+                    updateTask.Wait();
                 } else {
                     if (options.GetStale () == IndexUpdateMode.After 
-                        && lastSequence < GetLastSequenceNumber())
+                        && lastSequence < GetLastSequenceNumber()) {
                         // NOTE: The exception is handled inside the thread.
                         // TODO: Consider using the async keyword instead.
-                        Manager.RunAsync(()=>{
+                        var updateTask = Manager.RunAsync(()=>{
                             try
                             {
                                 view.UpdateIndex();
@@ -1346,8 +1357,10 @@ PRAGMA user_version = 3;";
                             {
                                 Log.E(Database.Tag, "Error updating view index on background thread", e);
                             }
+                            return null;
                         });
-
+                        updateTask.Wait();
+                    }
                 }
                 rows = view.QueryWithOptions (options);
             } else {
@@ -2376,43 +2389,50 @@ PRAGMA user_version = 3;";
             Cursor cursor = null;
             try
             {
-                cursor = null;
-                var cols = "revid, deleted, sequence";
-                if (!contentOptions.Contains(TDContentOptions.TDNoBody))
+                var task = Manager.RunAsync(()=>
                 {
-                    cols += ", json";
-                }
-                if (rev != null)
-                {
-                    sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=@ AND revs.doc_id=docs.doc_id AND revid=@ LIMIT 1";
-                    var args = new[] { id, rev };
-                    cursor = StorageEngine.RawQuery(sql, args);
-                }
-                else
-                {
-                    sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=@ AND revs.doc_id=docs.doc_id and current=1 and deleted=0 ORDER BY revid DESC LIMIT 1";
-                    var args = new[] { id };
-                    cursor = StorageEngine.RawQuery(sql, CommandBehavior.SequentialAccess, args);
-                }
-                if (cursor.MoveToNext())
-                {
-                    if (rev == null)
+                    cursor = null;
+                    var cols = "revid, deleted, sequence";
+                    if (!contentOptions.Contains(TDContentOptions.TDNoBody))
                     {
-                        rev = cursor.GetString(0);
+                        cols += ", json";
                     }
-                    var deleted = cursor.GetInt(1) > 0;
-                    result = new RevisionInternal(id, rev, deleted, this);
-                    result.SetSequence(cursor.GetLong(2));
-                    if (!contentOptions.Equals(EnumSet.Of(TDContentOptions.TDNoBody)))
+                    if (rev != null)
                     {
-                        byte[] json = null;
-                        if (!contentOptions.Contains(TDContentOptions.TDNoBody))
+                        sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=@ AND revs.doc_id=docs.doc_id AND revid=@ LIMIT 1";
+                        var args = new[] { id, rev };
+                        cursor = StorageEngine.RawQuery(sql, args);
+                    }
+                    else
+                    {
+                        sql = "SELECT " + cols + " FROM revs, docs WHERE docs.docid=@ AND revs.doc_id=docs.doc_id and current=1 and deleted=0 ORDER BY revid DESC LIMIT 1";
+                        var args = new[] { id };
+                        cursor = StorageEngine.RawQuery(sql, CommandBehavior.SequentialAccess, args);
+                    }
+                    if (cursor.MoveToNext())
+                    {
+                        if (rev == null)
                         {
-                            json = cursor.GetBlob(3);
+                            rev = cursor.GetString(0);
                         }
-                        ExpandStoredJSONIntoRevisionWithAttachments(json, result, contentOptions);
+                        var deleted = cursor.GetInt(1) > 0;
+                        result = new RevisionInternal(id, rev, deleted, this);
+                        result.SetSequence(cursor.GetLong(2));
+                        if (!contentOptions.Equals(EnumSet.Of(TDContentOptions.TDNoBody)))
+                        {
+                            byte[] json = null;
+                            if (!contentOptions.Contains(TDContentOptions.TDNoBody))
+                            {
+                                json = cursor.GetBlob(3);
+                            }
+                            ExpandStoredJSONIntoRevisionWithAttachments(json, result, contentOptions);
+                        }
                     }
-                }
+                    return result;
+                });
+                if (task.Status == TaskStatus.Faulted)
+                    throw task.Exception;
+                result = task.Result;
             }
             catch (SQLException e)
             {

@@ -76,8 +76,10 @@ namespace Couchbase.Lite.Storage
         static readonly IsolationLevel DefaultIsolationLevel = IsolationLevel.ReadCommitted;
 
         private SqliteConnection Connection;
-        private SqliteTransaction currentTransaction;
+//        private SqliteTransaction currentTransaction;
         private Boolean shouldCommit;
+
+        private SqliteTransaction CurrentTransaction { get { return _transactions.Count > 0 ? _transactions.Peek() : null; } }
 
         #region implemented abstract members of SQLiteStorageEngine
 
@@ -152,13 +154,17 @@ namespace Couchbase.Lite.Storage
 
         int transactionCount = 0;
 
+        Stack<SqliteTransaction> _transactions = new Stack<SqliteTransaction>();
+
         public override void BeginTransaction (IsolationLevel isolationLevel)
         {
             // NOTE.ZJG: Seems like we should really be using TO SAVEPOINT
             //           but this is how Android SqliteDatabase does it,
             //           so I'm matching that for now.
-            Interlocked.Increment(ref transactionCount);
-            currentTransaction = Connection.BeginTransaction(isolationLevel);
+//            Interlocked.Increment(ref transactionCount);
+            var transaction = Connection.BeginTransaction(isolationLevel);
+            _transactions.Push(transaction);
+            //currentTransaction = transaction;
         }
 
         public override void EndTransaction ()
@@ -166,22 +172,26 @@ namespace Couchbase.Lite.Storage
             if (Connection.State != ConnectionState.Open)
                 throw new InvalidOperationException("Database is not open.");
 
-            if (Interlocked.Decrement(ref transactionCount) > 0)
-                return;
+//            if (Interlocked.Decrement(ref transactionCount) > 0)
+//                return;
 
-            if (currentTransaction == null) {
+
+
+            if (_transactions.Count == 0) {
                 if (shouldCommit)
                     throw new InvalidOperationException ("Transaction missing.");
                 return;
             }
+
+            var transaction = _transactions.Pop();
             if (shouldCommit) {
-                currentTransaction.Commit();
-                shouldCommit = false;
+                transaction.Commit();
+                shouldCommit = shouldCommit && _transactions.Any();
             } else {
-                currentTransaction.Rollback();
+                transaction.Rollback();
             }
-            currentTransaction.Dispose();
-            currentTransaction = null;
+            transaction.Dispose();
+            transaction = null;
         }
 
         public override void SetTransactionSuccessful ()
@@ -247,7 +257,7 @@ namespace Couchbase.Lite.Storage
 
                 // Get the new row's id.
                 // TODO.ZJG: This query should ultimately be replaced with a call to sqlite3_last_insert_rowid.
-                var lastInsertedIndexCommand = new SqliteCommand("select last_insert_rowid()", Connection, currentTransaction);
+                var lastInsertedIndexCommand = new SqliteCommand("select last_insert_rowid()", Connection, null);
                 lastInsertedId = (Int64)lastInsertedIndexCommand.ExecuteScalar();
                 lastInsertedIndexCommand.Dispose();
                 if (lastInsertedId == -1L) {
@@ -313,8 +323,8 @@ namespace Couchbase.Lite.Storage
             var command = Connection.CreateCommand ();
             command.CommandText = sql.ReplacePositionalParams ();
 
-            if (currentTransaction != null)
-                command.Transaction = currentTransaction;
+            if (_transactions.Count > 0)
+                command.Transaction = CurrentTransaction;
 
             if (paramArgs != null && paramArgs.Length > 0)
                 command.Parameters.AddRange (paramArgs.ToSqliteParameters ());
@@ -362,7 +372,7 @@ namespace Couchbase.Lite.Storage
                 sqlParams.AddRange(whereArgs.ToSqliteParameters());
 
             var sql = builder.ToString();
-            var command = new SqliteCommand(sql, Connection, currentTransaction);
+            var command = new SqliteCommand(sql, Connection, CurrentTransaction);
             command.Parameters.Clear();
             command.Parameters.AddRange(sqlParams.ToArray());
 
@@ -413,7 +423,7 @@ namespace Couchbase.Lite.Storage
             builder.Append(")");
 
             var sql = builder.ToString();
-            var command = new SqliteCommand(sql, Connection, currentTransaction);
+            var command = new SqliteCommand(sql, Connection, CurrentTransaction);
             command.Parameters.Clear();
             command.Parameters.AddRange(sqlParams);
 
@@ -436,7 +446,7 @@ namespace Couchbase.Lite.Storage
                 builder.Append(whereClause.ReplacePositionalParams());
             }
 
-            var command = new SqliteCommand(builder.ToString(), Connection, currentTransaction);
+            var command = new SqliteCommand(builder.ToString(), Connection, CurrentTransaction);
             command.Parameters.Clear();
             command.Parameters.AddRange(whereArgs.ToSqliteParameters());
 

@@ -322,20 +322,24 @@ namespace Couchbase.Lite {
         /// </exception>
         public virtual QueryEnumerator Run() 
         {
-            if (!Database.Open())
-            {
-                throw new CouchbaseLiteException("The database has been closed.");
-            }
+            var query = Database.Manager.RunAsync(()=>{
+                if (!Database.Open())
+                {
+                    throw new CouchbaseLiteException("The database has been closed.");
+                }
 
-            var outSequence = new AList<long>();
-            var viewName = (View != null) ? View.Name : null;
-            var queryOptions = QueryOptions;
+                var outSequence = new AList<long>();
+                var viewName = (View != null) ? View.Name : null;
+                var queryOptions = QueryOptions;
 
-            var rows = Database.QueryViewNamed (viewName, queryOptions, outSequence);
+                var rows = Database.QueryViewNamed (viewName, queryOptions, outSequence);
 
-            LastSequence = outSequence[0]; // potential concurrency issue?
+                LastSequence = outSequence[0]; // potential concurrency issue?
 
-            return new QueryEnumerator(Database, rows, outSequence[0]);
+                return new QueryEnumerator(Database, rows, outSequence[0]);
+
+            });
+            return query.Result;
         }
 
         /// <summary>
