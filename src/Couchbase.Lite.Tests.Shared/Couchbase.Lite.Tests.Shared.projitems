@@ -6,7 +6,7 @@
     <SharedGUID>{D06EDB2A-0AE0-4606-A8AE-AA3F6248630F}</SharedGUID>
   </PropertyGroup>
   <PropertyGroup Label="Configuration">
-    <Import_RootNamespace>Couchbase.Lite.Tests.Shared</Import_RootNamespace>
+    <Import_RootNamespace>Couchbase.Lite.Tests</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)ApiTest.cs" />
