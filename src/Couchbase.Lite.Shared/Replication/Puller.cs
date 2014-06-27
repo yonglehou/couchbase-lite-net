@@ -167,14 +167,14 @@ namespace Couchbase.Lite.Replicator
             base.Stop();
 		}
 
-        internal override void Stopped()
+        internal override void OnStopping()
 		{
             if (downloadsToInsert != null)
             {
                 downloadsToInsert.Flush();
                 //downloadsToInsert = null;
             }
-			base.Stopped();
+			base.OnStopping();
 		}
 
 		// Got a _changes feed entry from the ChangeTracker.

@@ -301,6 +301,7 @@ namespace Couchbase.Lite
             }
         }
 
+        Task notifyTask;
 
         void NotifyChangeListeners ()
         {
@@ -312,7 +313,7 @@ namespace Couchbase.Lite
             var args = new ReplicationChangeEventArgs(this);
 
             // Ensure callback runs on captured context, which should be the UI thread.
-            LocalDatabase.Manager.CapturedContext.StartNew(()=>evt(this, args));
+            notifyTask = LocalDatabase.Manager.CapturedContext.StartNew(()=>evt(this, args));
         }
 
         //TODO: Do we need this method? It's not in the API Spec.
@@ -589,6 +590,18 @@ namespace Couchbase.Lite
             }
         }
 
+        internal void HardStop()
+        {
+            lock(asyncTaskLocker) {
+                asyncTaskCount = 0;
+                CancellationTokenSource.Cancel();
+                if (IsRunning)
+                    OnStopping();
+                else
+                    notifyTask.ContinueWith((t)=>OnStopped());
+            }
+        }
+
         internal void AsyncTaskFinished(Int32 numTasks)
         {
 //            TODO: Check to see if retry policy isn't throwing this number off.
@@ -643,8 +656,8 @@ namespace Couchbase.Lite
                     {
                         if (!continuous) 
                         {
-                            Log.D(Tag, this + " since !continuous, calling stopped()");
-                            Stopped();
+                            Log.D(Tag, this + " since !continuous, calling stopping()");
+                            OnStopping();
                         } 
                         else if (LastError != null) /*(revisionsFailed > 0)*/ 
                         {
@@ -663,7 +676,7 @@ namespace Couchbase.Lite
             }
         }
 
-        internal virtual void Stopped()
+        internal virtual void OnStopping()
         {
             Log.V(Tag, ToString() + " STOPPING");
             IsRunning = false;
@@ -673,7 +686,19 @@ namespace Couchbase.Lite
             Log.V(Tag, this + " set batcher to null");
             Batcher = null;
             ClearDbRef();
+            OnStopped ();
             Log.V(Tag, ToString() + " STOPPED");
+        }
+
+        public event EventHandler<EventArgs> Stopped;
+
+        internal virtual void OnStopped ()
+        {
+            var stopEvt = Stopped;
+            if (stopEvt != null) {
+                var args = new EventArgs ();
+                stopEvt (this, args);
+            }
         }
 
         internal void SaveLastSequence()
@@ -1479,9 +1504,9 @@ namespace Couchbase.Lite
                 
             if (IsRunning && asyncTaskCount <= 0)
             {
-                Stopped();
+                OnStopping();
 //                var timeout = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-                //System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5));
+//                System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5));
 //                var spinWait = new SpinWait();
 //                const int maxSpins = 100;
 //                var shouldExit = false;

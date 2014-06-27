@@ -54,6 +54,8 @@ using System.Diagnostics;
 using System.Net;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace Couchbase.Lite
 {
@@ -252,6 +254,20 @@ namespace Couchbase.Lite
         protected void TearDown()
 		{
 			Log.V(Tag, "tearDown");
+            var source = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var result = Parallel.ForEach(database.AllReplications, new ParallelOptions() { CancellationToken = source.Token }, (r)=>
+                {
+                    var resetEvent = new ManualResetEvent(false);
+                    r.Stopped += (sender, e) => 
+                        resetEvent.Set();
+                    r.HardStop();
+                    resetEvent.WaitOne(TimeSpan.FromSeconds(5));
+                });
+            while (!result.IsCompleted)
+            {
+                System.Threading.Thread.Sleep(300);
+            }
+
 			StopDatabase();
 			StopCBLite();
 		}

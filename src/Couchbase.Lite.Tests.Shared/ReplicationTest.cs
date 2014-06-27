@@ -152,6 +152,7 @@ namespace Couchbase.Lite.Replicator
                     Log.D(Tag, msg);
                     this.doneSignal.CountDown();
                     System.Threading.Thread.Sleep(5000);
+                    return;
                 }
                 else
                 {
