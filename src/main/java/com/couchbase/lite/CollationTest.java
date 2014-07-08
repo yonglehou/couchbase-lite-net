@@ -1,6 +1,8 @@
 package com.couchbase.lite;
 
 import com.couchbase.lite.util.Log;
+import com.couchbase.touchdb.RevCollator;
+import com.couchbase.touchdb.TDCollateJSON;
 
 import junit.framework.Assert;
 
@@ -31,77 +33,78 @@ public class CollationTest extends LiteTestCase {
     public void testCollateScalars() {
 
         int mode = kTDCollateJSON_Unicode;
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "true", 0, "false"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "false", 0, "true"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "null", 0, "17"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "1"));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "0123.0"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "\"123\""));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"123\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"1235\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"1234\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"12\\/34\"", 0, "\"12/34\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"\\/1234\"", 0, "\"/1234\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\\/\"", 0, "\"1234/\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"a\"", 0, "\"A\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"A\"", 0, "\"aa\""));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "\"B\"", 0, "\"aa\""));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "true", "false"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "false", "true"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "null", "17"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "123", "1"));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "123", "0123.0"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "123", "\"123\""));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"123\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"1235\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"1234\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"12\\/34\"", "\"12/34\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"\\/1234\"", "\"/1234\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\\/\"", "\"1234/\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"a\"", "\"A\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"A\"", "\"aa\""));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "\"B\"", "\"aa\""));
 
 
     }
 
+
     public void testCollateASCII() {
         int mode = kTDCollateJSON_ASCII;
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "true", 0, "false"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "false", 0, "true"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "null", 0, "17"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "1"));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "0123.0"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "123", 0, "\"123\""));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"123\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"1235\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\"", 0, "\"1234\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"12\\/34\"", 0, "\"12/34\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"\\/1234\"", 0, "\"/1234\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "\"1234\\/\"", 0, "\"1234/\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"A\"", 0, "\"a\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"B\"", 0, "\"a\""));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "true", "false"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "false", "true"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "null", "17"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "123", "1"));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "123", "0123.0"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "123", "\"123\""));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"123\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"1235\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\"", "\"1234\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"12\\/34\"", "\"12/34\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"\\/1234\"", "\"/1234\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "\"1234\\/\"", "\"1234/\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"A\"", "\"a\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"B\"", "\"a\""));
     }
 
     public void testCollateRaw() {
         int mode = kTDCollateJSON_Raw;
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "false", 0, "17"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "false", 0, "true"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "null", 0, "true"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "[\"A\"]", 0, "\"A\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "\"A\"", 0, "\"a\""));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "[\"b\"]", 0, "[\"b\",\"c\",\"a\"]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "false", "17"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "false", "true"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "null", "true"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "[\"A\"]", "\"A\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "\"A\"", "\"a\""));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "[\"b\"]", "[\"b\",\"c\",\"a\"]"));
     }
 
     public void testCollateArrays() {
         int mode = kTDCollateJSON_Unicode;
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[]", 0, "\"foo\""));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "[]", 0, "[]"));
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, "[true]", 0, "[true]"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[false]", 0, "[null]"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "[]", 0, "[null]"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[123]", 0, "[45]"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[123]", 0, "[45,67]"));
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[123.4,\"wow\"]", 0, "[123.40,789]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[]", "\"foo\""));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "[]", "[]"));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, "[true]", "[true]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[false]", "[null]"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "[]", "[null]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[123]", "[45]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[123]", "[45,67]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[123.4,\"wow\"]", "[123.40,789]"));
     }
 
     public void testCollateNestedArray() {
         int mode = kTDCollateJSON_Unicode;
-        Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, "[[]]", 0, "[]"));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, "[1,[2,3],4]", 0, "[1,[2,3.1],4,5,6]"));
+        Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, "[[]]", "[]"));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, "[1,[2,3],4]", "[1,[2,3.1],4,5,6]"));
     }
 
     public void testCollateUnicodeStrings() {
         int mode = kTDCollateJSON_Unicode;
-        Assert.assertEquals(0, TDCollateJSON.testCollateJSON(mode, 0, encode("fr�d"), 0, encode("fr�d")));
-        // Assert.assertEquals(1, TDCollateJSON.testCollateJSON(mode, 0, encode("�m�"), 0, encode("omo")));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, encode("\t"), 0, encode(" ")));
-        Assert.assertEquals(-1, TDCollateJSON.testCollateJSON(mode, 0, encode("\001"), 0, encode(" ")));
+        Assert.assertEquals(0, TDCollateJSON.testCollateJSONWrapper(mode, encode("fr�d"), encode("fr�d")));
+        // Assert.assertEquals(1, TDCollateJSON.testCollateJSONWrapper(mode, encode("�m�"), encode("omo")));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, encode("\t"), encode(" ")));
+        Assert.assertEquals(-1, TDCollateJSON.testCollateJSONWrapper(mode, encode("\001"), encode(" ")));
 
     }
 
@@ -118,6 +121,30 @@ public class CollationTest extends LiteTestCase {
         Assert.assertEquals(7, TDCollateJSON.testDigitToInt('7'));
         Assert.assertEquals(0xc, TDCollateJSON.testDigitToInt('c'));
         Assert.assertEquals(0xc, TDCollateJSON.testDigitToInt('C'));
+    }
+
+    public void testCollateRevIds() {
+        Assert.assertEquals(RevCollator.testCollateRevIds("1-foo", "1-foo"), 0);
+        Assert.assertEquals(RevCollator.testCollateRevIds("2-bar", "1-foo"), 1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("1-foo", "2-bar"), -1);
+        // Multi-digit:
+        Assert.assertEquals(RevCollator.testCollateRevIds("123-bar", "456-foo"), -1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("456-foo", "123-bar"), 1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("456-foo", "456-foo"), 0);
+        Assert.assertEquals(RevCollator.testCollateRevIds("456-foo", "456-foofoo"), -1);
+        // Different numbers of digits:
+        Assert.assertEquals(RevCollator.testCollateRevIds("89-foo", "123-bar"), -1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("123-bar", "89-foo"), 1);
+        // Edge cases:
+        Assert.assertEquals(RevCollator.testCollateRevIds("123-", "89-"), 1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("123-a", "123-a"), 0);
+        // Invalid rev IDs:
+        Assert.assertEquals(RevCollator.testCollateRevIds("-a", "-b"), -1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("-", "-"), 0);
+        Assert.assertEquals(RevCollator.testCollateRevIds("", ""), 0);
+        Assert.assertEquals(RevCollator.testCollateRevIds("", "-b"), -1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("bogus", "yo"), -1);
+        Assert.assertEquals(RevCollator.testCollateRevIds("bogus-x", "yo-y"), -1);
     }
 
 }

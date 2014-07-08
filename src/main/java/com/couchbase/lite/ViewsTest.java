@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 
 public class ViewsTest extends LiteTestCase {
@@ -297,6 +299,19 @@ public class ViewsTest extends LiteTestCase {
         view.deleteIndex();
     }
 
+    public void testViewIndexSkipsDesignDocs() throws CouchbaseLiteException {
+        View view = createView(database);
+
+        Map<String, Object> designDoc = new HashMap<String, Object>();
+        designDoc.put("_id", "_design/test");
+        designDoc.put("key", "value");
+        putDoc(database, designDoc);
+
+        view.updateIndex();
+        List<QueryRow> rows = view.queryWithOptions(null);
+        assertEquals(0, rows.size());
+    }
+
     public void testViewQuery() throws CouchbaseLiteException {
 
         putDocs(database);
@@ -431,6 +446,87 @@ public class ViewsTest extends LiteTestCase {
         Assert.assertEquals(dict2.get("key"), rows.get(1).getKey());
         Assert.assertEquals(dict2.get("value"), rows.get(1).getValue());
 
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-android/issues/139
+     * test based on https://github.com/couchbase/couchbase-lite-ios/blob/master/Source/CBL_View_Tests.m#L358
+     */
+    public void testViewQueryStartKeyDocID() throws CouchbaseLiteException {
+
+        putDocs(database);
+        List<RevisionInternal> result = new ArrayList<RevisionInternal>();
+        Map<String,Object> dict = new HashMap<String,Object>();
+        dict.put("_id", "11112");
+        dict.put("key", "one");
+        result.add(putDoc(database, dict));
+        View view = createView(database);
+
+        view.updateIndex();
+        QueryOptions options = new QueryOptions();
+        options.setStartKey("one");
+        options.setStartKeyDocId("11112");
+        options.setEndKey("three");
+        List<QueryRow> rows = view.queryWithOptions(options);
+
+        assertEquals(2, rows.size());
+        assertEquals("11112", rows.get(0).getDocumentId());
+        assertEquals("one", rows.get(0).getKey());
+        assertEquals("33333", rows.get(1).getDocumentId());
+        assertEquals("three", rows.get(1).getKey());
+
+        options = new QueryOptions();
+        options.setEndKey("one");
+        options.setEndKeyDocId("11111");
+        rows = view.queryWithOptions(options);
+
+        Log.d(TAG, "rows: " + rows);
+        assertEquals(3, rows.size());
+        assertEquals("55555", rows.get(0).getDocumentId());
+        assertEquals("five", rows.get(0).getKey());
+        assertEquals("44444", rows.get(1).getDocumentId());
+        assertEquals("four", rows.get(1).getKey());
+        assertEquals("11111", rows.get(2).getDocumentId());
+        assertEquals("one", rows.get(2).getKey());
+
+        options.setStartKey("one");
+        options.setStartKeyDocId("11111");
+        rows = view.queryWithOptions(options);
+        assertEquals(1, rows.size());
+        assertEquals("11111", rows.get(0).getDocumentId());
+        assertEquals("one", rows.get(0).getKey());
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-android/issues/260
+     */
+    public void testViewNumericKeys() throws CouchbaseLiteException {
+        Map<String,Object> dict = new HashMap<String,Object>();
+        dict.put("_id", "22222");
+        dict.put("referenceNumber", 33547239);
+        dict.put("title", "this is the title");
+        putDoc(database, dict);
+
+        View view = createView(database);
+
+        view.setMap(new Mapper() {
+            @Override
+            public void map(Map<String, Object> document, Emitter emitter) {
+                if (document.containsKey("referenceNumber")){
+                    emitter.emit(document.get("referenceNumber"), document);
+                }
+
+            }
+        }, "1");
+
+        Query query = view.createQuery();
+        query.setStartKey(33547239);
+        query.setEndKey(33547239);
+        QueryEnumerator rows = query.run();
+        assertEquals(1, rows.getCount());
+
+        assertEquals(33547239, rows.getRow(0).getKey());
     }
 
     public void testAllDocsQuery() throws CouchbaseLiteException {
@@ -1141,6 +1237,141 @@ public class ViewsTest extends LiteTestCase {
             Assert.assertEquals(expected[i][4], doc.get("_id")); 
 
         }
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/29
+     */
+    public void testRunLiveQueriesWithReduce() throws Exception {
+
+        final Database db = startDatabase();
+        // run a live query
+        View view = db.getView("vu");
+        view.setMapReduce(new Mapper() {
+                              @Override
+                              public void map(Map<String, Object> document, Emitter emitter) {
+                                  emitter.emit(document.get("sequence"), 1);
+                              }
+                          }, new Reducer() {
+                              @Override
+                              public Object reduce(List<Object> keys, List<Object> values, boolean rereduce) {
+                                  return View.totalValues(values);
+                              }
+                          },
+                "1"
+        );
+        final LiveQuery query = view.createQuery().toLiveQuery();
+
+        View view1 = db.getView("vu1");
+        view1.setMapReduce(new Mapper() {
+                               @Override
+                               public void map(Map<String, Object> document, Emitter emitter) {
+                                   emitter.emit(document.get("sequence"), 1);
+                               }
+                           }, new Reducer() {
+                               @Override
+                               public Object reduce(List<Object> keys, List<Object> values, boolean rereduce) {
+                                   return View.totalValues(values);
+                               }
+                           },
+                "1"
+        );
+        final LiveQuery query1 = view1.createQuery().toLiveQuery();
+
+        final int kNDocs = 10;
+        createDocumentsAsync(db, kNDocs);
+
+        assertNull(query.getRows());
+        query.start();
+
+        final CountDownLatch gotExpectedQueryResult = new CountDownLatch(1);
+
+        query.addChangeListener(new LiveQuery.ChangeListener() {
+            @Override
+            public void changed(LiveQuery.ChangeEvent event) {
+                if (event.getError() != null) {
+                    Log.e(TAG, "LiveQuery change event had error", event.getError());
+                } else if (event.getRows().getCount() == 1 && ((Double) event.getRows().getRow(0).getValue()).intValue() == kNDocs) {
+                    gotExpectedQueryResult.countDown();
+                }
+            }
+        });
+        boolean success = gotExpectedQueryResult.await(30, TimeUnit.SECONDS);
+        Assert.assertTrue(success);
+
+        query.stop();
+
+
+        query1.start();
+
+        createDocumentsAsync(db, kNDocs + 5);//10 + 10 + 5
+
+        final CountDownLatch gotExpectedQuery1Result = new CountDownLatch(1);
+        query1.addChangeListener(new LiveQuery.ChangeListener() {
+            @Override
+            public void changed(LiveQuery.ChangeEvent event) {
+                if (event.getError() != null) {
+                    Log.e(TAG, "LiveQuery change event had error", event.getError());
+                } else if (event.getRows().getCount() == 1 && ((Double) event.getRows().getRow(0).getValue()).intValue() == 2*kNDocs + 5) {
+                    gotExpectedQuery1Result.countDown();
+                }
+            }
+        });
+        success = gotExpectedQuery1Result.await(30, TimeUnit.SECONDS);
+        Assert.assertTrue(success);
+
+        query1.stop();
+
+        assertEquals(2*kNDocs + 5, db.getDocumentCount()); // 25 - OK
+
+
+    }
+
+    private SavedRevision createTestRevisionNoConflicts(Document doc, String val) throws Exception {
+        UnsavedRevision unsavedRev = doc.createRevision();
+        Map<String,Object> props = new HashMap<String,Object>();
+        props.put("key", val);
+        unsavedRev.setUserProperties(props);
+        return unsavedRev.save();
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/131
+     */
+    public void testViewWithConflict() throws Exception {
+
+        // Create doc and add some revs
+        Document doc = database.createDocument();
+        SavedRevision rev1 = createTestRevisionNoConflicts(doc, "1");
+        SavedRevision rev2a = createTestRevisionNoConflicts(doc, "2a");
+        SavedRevision rev3 = createTestRevisionNoConflicts(doc, "3");
+
+        // index the view
+        View view = createView(database);
+        QueryEnumerator rows = view.createQuery().run();
+
+        assertEquals(1, rows.getCount());
+        QueryRow row = rows.next();
+        assertEquals(row.getKey(), "3");
+        // assertNotNull(row.getDocumentRevisionId()); -- TODO: why is this null?
+
+        // Create a conflict
+        UnsavedRevision rev2bUnsaved = rev1.createRevision();
+        Map<String,Object> props = new HashMap<String,Object>();
+        props.put("key", "2b");
+        rev2bUnsaved.setUserProperties(props);
+        SavedRevision rev2b = rev2bUnsaved.save(true);
+
+        // re-run query
+        view.updateIndex();
+        rows = view.createQuery().run();
+
+        // we should only see one row, with key=3.
+        // if we see key=2b then it's a bug.
+        assertEquals(1, rows.getCount());
+        row = rows.next();
+        assertEquals(row.getKey(), "3");
+
     }
 
 }

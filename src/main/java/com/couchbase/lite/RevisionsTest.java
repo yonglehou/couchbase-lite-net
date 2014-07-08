@@ -1,13 +1,19 @@
 package com.couchbase.lite;
 
 import com.couchbase.lite.internal.RevisionInternal;
+import com.couchbase.lite.util.Log;
 
 import junit.framework.Assert;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Observable;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class RevisionsTest extends LiteTestCase {
 
@@ -129,6 +135,205 @@ public class RevisionsTest extends LiteTestCase {
 
         historyDict = Database.makeRevisionHistoryDict(revs);
         Assert.assertEquals(expectedHistoryDict, historyDict);
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/164
+     */
+    public void testRevisionIdDifferentRevisions() throws Exception {
+
+        // two revisions with different json should have different rev-id's
+        // because their content will have a different hash (even though
+        // they have the same generation number)
+
+        Map<String, Object> properties = new HashMap<String, Object>();
+        properties.put("testName", "testCreateRevisions");
+        properties.put("tag", 1337);
+
+        Document doc = database.createDocument();
+        UnsavedRevision newRev = doc.createRevision();
+        newRev.setUserProperties(properties);
+        SavedRevision rev1 = newRev.save();
+
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+
+        assertNotSame(rev2a.getId(), rev2b.getId());
+
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/164
+     */
+    public void testRevisionIdEquivalentRevisions() throws Exception {
+
+        // two revisions with the same content and the same json
+        // should have the exact same revision id, because their content
+        // will have an identical hash
+
+        Map<String, Object> properties = new HashMap<String, Object>();
+        properties.put("testName", "testCreateRevisions");
+        properties.put("tag", 1337);
+
+        Map<String, Object> properties2 = new HashMap<String, Object>();
+        properties2.put("testName", "testCreateRevisions");
+        properties2.put("tag", 1338);
+
+        Document doc = database.createDocument();
+        UnsavedRevision newRev = doc.createRevision();
+        newRev.setUserProperties(properties);
+        SavedRevision rev1 = newRev.save();
+
+        UnsavedRevision newRev2a = rev1.createRevision();
+        newRev2a.setUserProperties(properties2);
+        SavedRevision rev2a = newRev2a.save();
+
+        UnsavedRevision newRev2b = rev1.createRevision();
+        newRev2b.setUserProperties(properties2);
+        SavedRevision rev2b = newRev2b.save(true);
+
+        assertEquals(rev2a.getId(), rev2b.getId());
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/106
+     */
+    public void testResolveConflict() throws Exception {
+
+        Map<String, Object> properties = new HashMap<String, Object>();
+        properties.put("testName", "testCreateRevisions");
+        properties.put("tag", 1337);
+
+        // Create a conflict on purpose
+        Document doc = database.createDocument();
+
+        UnsavedRevision newRev1 = doc.createRevision();
+        newRev1.setUserProperties(properties);
+        SavedRevision rev1 = newRev1.save();
+
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+
+        SavedRevision winningRev = null;
+        SavedRevision losingRev = null;
+        if (doc.getCurrentRevisionId().equals(rev2a.getId())) {
+            winningRev = rev2a;
+            losingRev = rev2b;
+        } else {
+            winningRev = rev2b;
+            losingRev = rev2a;
+        }
+
+        assertEquals(2,doc.getConflictingRevisions().size());
+        assertEquals(2, doc.getLeafRevisions().size());
+
+        // let's manually choose the losing rev as the winner.  First, delete winner, which will
+        // cause losing rev to be the current revision.
+        SavedRevision deleteRevision = winningRev.deleteDocument();
+
+        List<SavedRevision> conflictingRevisions = doc.getConflictingRevisions();
+        assertEquals(1, conflictingRevisions.size());
+        assertEquals(2, doc.getLeafRevisions().size());
+
+        assertEquals(3, deleteRevision.getGeneration());
+        assertEquals(losingRev.getId(), doc.getCurrentRevision().getId());
+
+        // Finally create a new revision rev3 based on losing rev
+        SavedRevision rev3 = createRevisionWithRandomProps(losingRev, true);
+
+        assertEquals(rev3.getId(), doc.getCurrentRevisionId());
+
+        List<SavedRevision> conflictingRevisions1 = doc.getConflictingRevisions();
+        assertEquals(1, conflictingRevisions1.size());
+        assertEquals(2, doc.getLeafRevisions().size());
+
+    }
+
+    public void testCorrectWinningRevisionTiebreaker() throws Exception {
+
+        // Create a conflict on purpose
+        Document doc = database.createDocument();
+        SavedRevision rev1 = doc.createRevision().save();
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+
+        // the tiebreaker will happen based on which rev hash has lexicographically higher sort order
+        SavedRevision expectedWinner = null;
+        if (rev2a.getId().compareTo(rev2b.getId()) > 0) {
+            expectedWinner = rev2a;
+        } else if (rev2a.getId().compareTo(rev2b.getId()) < 0) {
+            expectedWinner = rev2b;
+        }
+
+        RevisionInternal revFound = database.getDocumentWithIDAndRev(doc.getId(), null, EnumSet.noneOf(Database.TDContentOptions.class));
+        assertEquals(expectedWinner.getId(), revFound.getRevId());
+
+    }
+
+    public void testCorrectWinningRevisionLongerBranch() throws Exception {
+
+        // Create a conflict on purpose
+        Document doc = database.createDocument();
+        SavedRevision rev1 = doc.createRevision().save();
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+        SavedRevision rev3b = createRevisionWithRandomProps(rev2b, true);
+
+        // rev3b should be picked as the winner since it has a longer branch
+        SavedRevision expectedWinner = rev3b;
+
+        RevisionInternal revFound = database.getDocumentWithIDAndRev(doc.getId(), null, EnumSet.noneOf(Database.TDContentOptions.class));
+        assertEquals(expectedWinner.getId(), revFound.getRevId());
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/135
+     */
+    public void testCorrectWinningRevisionHighRevisionNumber() throws Exception {
+
+        // Create a conflict on purpose
+        Document doc = database.createDocument();
+        SavedRevision rev1 = doc.createRevision().save();
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+        SavedRevision rev3b = createRevisionWithRandomProps(rev2b, true);
+        SavedRevision rev4b = createRevisionWithRandomProps(rev3b, true);
+        SavedRevision rev5b = createRevisionWithRandomProps(rev4b, true);
+        SavedRevision rev6b = createRevisionWithRandomProps(rev5b, true);
+        SavedRevision rev7b = createRevisionWithRandomProps(rev6b, true);
+        SavedRevision rev8b = createRevisionWithRandomProps(rev7b, true);
+        SavedRevision rev9b = createRevisionWithRandomProps(rev8b, true);
+        SavedRevision rev10b = createRevisionWithRandomProps(rev9b, true);
+
+        RevisionInternal revFound = database.getDocumentWithIDAndRev(doc.getId(), null, EnumSet.noneOf(Database.TDContentOptions.class));
+        assertEquals(rev10b.getId(), revFound.getRevId());
+
+    }
+
+
+
+    public void testDocumentChangeListener() throws Exception {
+
+        Document doc = database.createDocument();
+        final CountDownLatch documentChanged = new CountDownLatch(1);
+        doc.addChangeListener(new Document.ChangeListener() {
+            @Override
+            public void changed(Document.ChangeEvent event) {
+                DocumentChange docChange = event.getChange();
+                String msg = "New revision added: %s.  Conflict: %s";
+                msg = String.format(msg, docChange.getAddedRevision(), docChange.isConflict());
+                Log.d(TAG, msg);
+                documentChanged.countDown();
+            }
+        });
+        doc.createRevision().save();
+        boolean success = documentChanged.await(30, TimeUnit.SECONDS);
+        assertTrue(success);
 
     }
 

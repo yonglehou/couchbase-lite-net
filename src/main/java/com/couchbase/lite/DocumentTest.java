@@ -48,6 +48,17 @@ public class DocumentTest extends LiteTestCase {
 
     }
 
+    /**
+     * Port test over from:
+     * https://github.com/couchbase/couchbase-lite-ios/commit/e0469300672a2087feb46b84ca498facd49e0066
+     */
+    public void testGetNonExistentDocument() throws CouchbaseLiteException {
+        assertNull(database.getExistingDocument("missing"));
+        Document doc = database.getDocument("missing");
+        assertNotNull(doc);
+        assertNull(database.getExistingDocument("missing"));
+    }
+
     // Reproduces issue #167
     // https://github.com/couchbase/couchbase-lite-android/issues/167
     public void testLoadRevisionBody() throws CouchbaseLiteException {
@@ -73,7 +84,7 @@ public class DocumentTest extends LiteTestCase {
         database.loadRevisionBody(revisionInternal, contentOptions);
 
         // now lets purge the document, and then try to load the revision body again
-        assertTrue(document.purge());
+        document.purge();
 
         boolean gotExpectedException = false;
         try {
@@ -86,6 +97,26 @@ public class DocumentTest extends LiteTestCase {
 
         assertTrue(gotExpectedException);
 
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-android/issues/281
+     */
+    public void testDocumentWithRemovedProperty() {
+
+        Map<String, Object> props = new HashMap<String, Object>();
+        props.put("_id", "fakeid");
+        props.put("_removed", true);
+        props.put("foo", "bar");
+
+        Document doc = createDocumentWithProperties(database, props);
+        assertNotNull(doc);
+
+        Document docFetched = database.getDocument(doc.getId());
+        Map<String, Object> fetchedProps = docFetched.getCurrentRevision().getProperties();
+        assertNotNull(fetchedProps.get("_removed"));
+        assertTrue(docFetched.getCurrentRevision().isGone());
 
     }
 

@@ -46,11 +46,21 @@ public class RouterTest extends LiteTestCase {
 
     public void testDatabase() {
         send("PUT", "/database", Status.CREATED, null);
+        Map entries = new HashMap<String, Map<String,Object>>();;
+        entries.put("results", new ArrayList<Object>());
+        entries.put("last_seq", 0);
+
+
+        send("GET", "/database/_changes?feed=normal&heartbeat=300000&style=all_docs", Status.OK, entries);
 
         Map<String,Object> dbInfo = (Map<String,Object>)send("GET", "/database", Status.OK, null);
+        assertEquals(6, dbInfo.size());
         assertEquals(0, dbInfo.get("doc_count"));
         assertEquals(0, dbInfo.get("update_seq"));
         assertTrue((Integer)dbInfo.get("disk_size") > 8000);
+        assertEquals("database", dbInfo.get("db_name"));
+        assertTrue(System.currentTimeMillis() * 1000 > (Long) dbInfo.get("instance_start_time"));
+        assertTrue(dbInfo.containsKey("db_uuid"));
 
         send("PUT", "/database", Status.PRECONDITION_FAILED, null);
         send("PUT", "/database2", Status.CREATED, null);
@@ -91,6 +101,21 @@ public class RouterTest extends LiteTestCase {
         docWithAttachment.put("_attachments", attachments);
 
         Map<String,Object> result = (Map<String,Object>)sendBody("PUT", "/db/docWithAttachment", docWithAttachment, Status.CREATED, null);
+
+        Map expChanges = new HashMap<String, Map<String,Object>>();
+        List changesResults = new ArrayList();
+        Map docChanges = new HashMap<String,Object>();
+        docChanges.put("id", "docWithAttachment");
+        docChanges.put("seq", 1);
+        List lChanges = new ArrayList<Map<String, Object>>();
+        HashMap mChanges = new HashMap<String, Object>();
+        mChanges.put("rev", result.get("rev"));
+        lChanges.add(mChanges);
+        docChanges.put("changes", lChanges);
+        changesResults.add(docChanges);
+        expChanges.put("results", changesResults);
+        expChanges.put("last_seq", 1);
+        send("GET", "/db/_changes?feed=normal&heartbeat=300000&style=all_docs", Status.OK, expChanges);
 
         result = (Map<String,Object>)send("GET", "/db/docWithAttachment", Status.OK, null);
         Map<String,Object> attachmentsResult = (Map<String,Object>) result.get("_attachments");
@@ -449,9 +474,59 @@ public class RouterTest extends LiteTestCase {
         assertEquals(2, bulk_result.size());
         assertEquals(bulk_result.get(0).get("id"),  bulk_doc1.get("_id"));
         assertNotNull(bulk_result.get(0).get("rev"));
-        assertEquals(bulk_result.get(1).get("id"),  bulk_doc2.get("_id"));
+        assertEquals(bulk_result.get(1).get("id"), bulk_doc2.get("_id"));
         assertNotNull(bulk_result.get(1).get("rev"));
     }
+
+
+
+    public void failingTestPostBulkDocsWithConflict() {
+        send("PUT", "/db", Status.CREATED, null);
+
+        Map<String,Object> bulk_doc1 = new HashMap<String,Object>();
+        bulk_doc1.put("_id", "bulk_message1");
+        bulk_doc1.put("baz", "hello");
+
+        Map<String,Object> bulk_doc2 = new HashMap<String,Object>();
+        bulk_doc2.put("_id", "bulk_message2");
+        bulk_doc2.put("baz", "hi");
+
+
+        List<Map<String,Object>> list = new ArrayList<Map<String,Object>>();
+        list.add(bulk_doc1);
+        list.add(bulk_doc2);
+        list.add(bulk_doc2);
+
+        Map<String,Object> bodyObj = new HashMap<String,Object>();
+        bodyObj.put("docs", list);
+
+        List<Map<String,Object>> bulk_result  =
+                (ArrayList<Map<String,Object>>)sendBody("POST", "/db/_bulk_docs", bodyObj, Status.CREATED, null);
+
+        assertEquals(3, bulk_result.size());
+        assertEquals(bulk_result.get(0).get("id"),  bulk_doc1.get("_id"));
+        assertNotNull(bulk_result.get(0).get("rev"));
+        assertEquals(bulk_result.get(1).get("id"),  bulk_doc2.get("_id"));
+        assertNotNull(bulk_result.get(1).get("rev"));
+        assertEquals(2, bulk_result.get(2).size());
+        assertEquals(bulk_result.get(2).get("id"),  bulk_doc2.get("_id"));
+        assertEquals(bulk_result.get(2).get("error"), "conflict");
+
+
+        list = new ArrayList<Map<String,Object>>();
+        list.add(bulk_doc1);
+
+        bodyObj = new HashMap<String,Object>();
+        bodyObj.put("docs", list);
+
+        bulk_result  =  (ArrayList<Map<String,Object>>)sendBody("POST", "/db/_bulk_docs", bodyObj, Status.CREATED, null);
+        //https://github.com/couchbase/couchbase-lite-android/issues/79
+        assertEquals(1, bulk_result.size());
+        assertEquals(2, bulk_result.get(0).size());
+        assertEquals(bulk_result.get(0).get("id"),  bulk_doc1.get("_id"));
+        assertEquals(bulk_result.get(0).get("error"), "conflict");
+    }
+
 
     public void testPostKeysView() throws CouchbaseLiteException {
     	send("PUT", "/db", Status.CREATED, null);
@@ -624,7 +699,7 @@ public class RouterTest extends LiteTestCase {
             timeWaited += timeToWait;
         }
 
-        if (timeWaited > maxTimeToWaitMs) {
+        if (timeWaited >= maxTimeToWaitMs) {
             success = false;
         }
         return success;
@@ -647,6 +722,53 @@ public class RouterTest extends LiteTestCase {
 
         boolean success = waitForReplicationToFinish();
         assertTrue(success);
+
+    }
+
+    /**
+     * https://github.com/couchbase/couchbase-lite-java-core/issues/106
+     */
+    public void testResolveConflict() throws Exception {
+
+        Map<String,Object> result;
+
+        // Create a conflict on purpose
+        Document doc = database.createDocument();
+        SavedRevision rev1 = doc.createRevision().save();
+        SavedRevision rev2a = createRevisionWithRandomProps(rev1, false);
+        SavedRevision rev2b = createRevisionWithRandomProps(rev1, true);
+
+        SavedRevision winningRev = null;
+        SavedRevision losingRev = null;
+        if (doc.getCurrentRevisionId().equals(rev2a.getId())) {
+            winningRev = rev2a;
+            losingRev = rev2b;
+        } else {
+            winningRev = rev2b;
+            losingRev = rev2a;
+        }
+
+        assertEquals(2, doc.getConflictingRevisions().size());
+        assertEquals(2, doc.getLeafRevisions().size());
+
+        result = (Map<String,Object>)send("GET", String.format("/%s/%s?conflicts=true", DEFAULT_TEST_DB, doc.getId()), Status.OK, null);
+        List<String> conflicts = (List) result.get("_conflicts");
+        assertEquals(1, conflicts.size());
+        String conflictingRevId = conflicts.get(0);
+        assertEquals(losingRev.getId(), conflictingRevId);
+
+        long docNumericID = database.getDocNumericID(doc.getId());
+        assertTrue(docNumericID != 0);
+        assertNotNull(database.getDocument(doc.getId()));
+
+        Log.d(TAG, "docNumericID for " + doc.getId() + " is: " + docNumericID);
+
+        result = (Map<String,Object>)send("DELETE", String.format("/%s/%s?rev=%s", DEFAULT_TEST_DB, doc.getId(), conflictingRevId), Status.OK, null);
+
+        result = (Map<String,Object>)send("GET", String.format("/%s/%s?conflicts=true", DEFAULT_TEST_DB, doc.getId()), Status.OK, null);
+
+        conflicts = (List) result.get("_conflicts");
+        assertEquals(0, conflicts.size());
 
     }
 

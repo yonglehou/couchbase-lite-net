@@ -1,7 +1,6 @@
 package com.couchbase.lite.replicator;
 
 import com.couchbase.lite.LiteTestCase;
-import com.couchbase.lite.threading.BackgroundTask;
 import com.couchbase.lite.util.Log;
 
 import org.apache.http.HttpResponse;
@@ -14,8 +13,10 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -23,46 +24,15 @@ public class ChangeTrackerTest extends LiteTestCase {
 
     public static final String TAG = "ChangeTracker";
 
-    public void testChangeTracker() throws Throwable {
-
-        final CountDownLatch changeTrackerFinishedSignal = new CountDownLatch(1);
-        URL testURL = getReplicationURL();
-
-        ChangeTrackerClient client = new ChangeTrackerClient() {
-
-            @Override
-            public void changeTrackerStopped(ChangeTracker tracker) {
-                changeTrackerFinishedSignal.countDown();
-            }
-
-            @Override
-            public void changeTrackerReceivedChange(Map<String, Object> change) {
-                Object seq = change.get("seq");
-            }
-
-            @Override
-            public HttpClient getHttpClient() {
-            	return new DefaultHttpClient();
-            }
-        };
-
-        final ChangeTracker changeTracker = new ChangeTracker(testURL, ChangeTracker.ChangeTrackerMode.OneShot, false, 0, client);
-        changeTracker.start();
-
-        try {
-            boolean success = changeTrackerFinishedSignal.await(300, TimeUnit.SECONDS);
-            assertTrue(success);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
+    public void testChangeTrackerOneShot() throws Throwable {
+        changeTrackerTestWithMode(ChangeTracker.ChangeTrackerMode.OneShot, true);
     }
 
     public void testChangeTrackerLongPoll() throws Throwable {
-        changeTrackerTestWithMode(ChangeTracker.ChangeTrackerMode.LongPoll);
+        changeTrackerTestWithMode(ChangeTracker.ChangeTrackerMode.LongPoll, true);
     }
 
-    public void failingTestChangeTrackerContinuous() throws Throwable {
+    public void changeTrackerTestWithMode(ChangeTracker.ChangeTrackerMode mode, final boolean useMockReplicator) throws Throwable {
 
         final CountDownLatch changeTrackerFinishedSignal = new CountDownLatch(1);
         final CountDownLatch changeReceivedSignal = new CountDownLatch(1);
@@ -79,74 +49,34 @@ public class ChangeTrackerTest extends LiteTestCase {
             @Override
             public void changeTrackerReceivedChange(Map<String, Object> change) {
                 Object seq = change.get("seq");
+                if (useMockReplicator) {
+                    assertEquals("1", seq.toString());
+                }
                 changeReceivedSignal.countDown();
             }
 
             @Override
             public HttpClient getHttpClient() {
-                return new DefaultHttpClient();
-            }
-        };
-
-        final ChangeTracker changeTracker = new ChangeTracker(testURL, ChangeTracker.ChangeTrackerMode.Continuous, false, 0, client);
-        changeTracker.start();
-
-        try {
-            boolean success = changeReceivedSignal.await(300, TimeUnit.SECONDS);
-            assertTrue(success);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        changeTracker.stop();
-
-        try {
-            boolean success = changeTrackerFinishedSignal.await(300, TimeUnit.SECONDS);
-            assertTrue(success);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-    }
-
-    public void changeTrackerTestWithMode(ChangeTracker.ChangeTrackerMode mode) throws Throwable {
-
-        final CountDownLatch changeTrackerFinishedSignal = new CountDownLatch(1);
-        final CountDownLatch changeReceivedSignal = new CountDownLatch(1);
-
-        URL testURL = getReplicationURL();
-
-        ChangeTrackerClient client = new ChangeTrackerClient() {
-
-            @Override
-            public void changeTrackerStopped(ChangeTracker tracker) {
-                changeTrackerFinishedSignal.countDown();
-            }
-
-            @Override
-            public void changeTrackerReceivedChange(Map<String, Object> change) {
-                Object seq = change.get("seq");
-                assertEquals("*:1", seq.toString());
-                changeReceivedSignal.countDown();
-            }
-
-            @Override
-            public HttpClient getHttpClient() {
-                CustomizableMockHttpClient mockHttpClient = new CustomizableMockHttpClient();
-                mockHttpClient.setResponder("_changes", new CustomizableMockHttpClient.Responder() {
-                    @Override
-                    public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
-                        String json = "{\"results\":[\n" +
-                                "{\"seq\":\"*:1\",\"id\":\"doc1-138\",\"changes\":[{\"rev\":\"1-82d\"}]}],\n" +
-                                "\"last_seq\":\"*:50\"}";
-                        return CustomizableMockHttpClient.generateHttpResponseObject(json);
-                    }
-                });
-                return mockHttpClient;
+                if (useMockReplicator) {
+                    CustomizableMockHttpClient mockHttpClient = new CustomizableMockHttpClient();
+                    mockHttpClient.setResponder("_changes", new CustomizableMockHttpClient.Responder() {
+                        @Override
+                        public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
+                            String json = "{\"results\":[\n" +
+                                    "{\"seq\":\"1\",\"id\":\"doc1-138\",\"changes\":[{\"rev\":\"1-82d\"}]}],\n" +
+                                    "\"last_seq\":\"*:50\"}";
+                            return CustomizableMockHttpClient.generateHttpResponseObject(json);
+                        }
+                    });
+                    return mockHttpClient;
+                } else {
+                    return new DefaultHttpClient();
+                }
             }
         };
 
         final ChangeTracker changeTracker = new ChangeTracker(testURL, mode, false, 0, client);
+        changeTracker.setUsePOST(isTestingAgainstSyncGateway());
         changeTracker.start();
 
         try {
@@ -205,10 +135,18 @@ public class ChangeTrackerTest extends LiteTestCase {
         docIds.add("doc2");
         changeTrackerDocIds.setDocIDs(docIds);
 
-        String docIdsEncoded = URLEncoder.encode("[\"doc1\",\"doc2\"]");
+        String docIdsUnencoded = "[\"doc1\",\"doc2\"]";
+        String docIdsEncoded = URLEncoder.encode(docIdsUnencoded);
         String expectedFeedPath = String.format("_changes?feed=longpoll&limit=50&heartbeat=300000&since=0&filter=_doc_ids&doc_ids=%s", docIdsEncoded);
         final String changesFeedPath = changeTrackerDocIds.getChangesFeedPath();
         assertEquals(expectedFeedPath, changesFeedPath);
+
+        changeTrackerDocIds.setUsePOST(true);
+        Map<String, Object> postBodyMap = changeTrackerDocIds.changesFeedPOSTBodyMap();
+        assertEquals("_doc_ids", postBodyMap.get("filter"));
+        assertEquals(docIds, postBodyMap.get("doc_ids"));
+        String postBody = changeTrackerDocIds.changesFeedPOSTBody();
+        assertTrue(postBody.contains(docIdsUnencoded));
 
     }
 
@@ -223,6 +161,97 @@ public class ChangeTrackerTest extends LiteTestCase {
         final CustomizableMockHttpClient mockHttpClient = new CustomizableMockHttpClient();
         mockHttpClient.addResponderReturnInvalidChangesFeedJson();
         testChangeTrackerBackoff(mockHttpClient);
+    }
+
+    public void testChangeTrackerRecoverableError() throws Exception {
+        int errorCode = 503;
+        String statusMessage = "Transient Error";
+        int numExpectedChangeCallbacks = 2;
+        runChangeTrackerTransientError(ChangeTracker.ChangeTrackerMode.LongPoll, errorCode, statusMessage, numExpectedChangeCallbacks);
+    }
+
+    public void testChangeTrackerRecoverableIOException() throws Exception {
+        int errorCode = -1;  // special code to tell it to throw an IOException
+        String statusMessage = null;
+        int numExpectedChangeCallbacks = 2;
+        runChangeTrackerTransientError(ChangeTracker.ChangeTrackerMode.LongPoll, errorCode, statusMessage, numExpectedChangeCallbacks);
+    }
+
+    public void testChangeTrackerNonRecoverableError() throws Exception {
+        int errorCode = 404;
+        String statusMessage = "NOT FOUND";
+        int numExpectedChangeCallbacks = 1;
+        runChangeTrackerTransientError(ChangeTracker.ChangeTrackerMode.LongPoll, errorCode, statusMessage, numExpectedChangeCallbacks);
+    }
+
+    private void runChangeTrackerTransientError(ChangeTracker.ChangeTrackerMode mode,
+                                                final int errorCode,
+                                                final String statusMessage,
+                                                int numExpectedChangeCallbacks) throws Exception {
+
+        final CountDownLatch changeTrackerFinishedSignal = new CountDownLatch(1);
+        final CountDownLatch changeReceivedSignal = new CountDownLatch(numExpectedChangeCallbacks);
+
+        URL testURL = getReplicationURL();
+
+        ChangeTrackerClient client = new ChangeTrackerClient() {
+
+            @Override
+            public void changeTrackerStopped(ChangeTracker tracker) {
+                changeTrackerFinishedSignal.countDown();
+            }
+
+            @Override
+            public void changeTrackerReceivedChange(Map<String, Object> change) {
+                changeReceivedSignal.countDown();
+            }
+
+            @Override
+            public HttpClient getHttpClient() {
+                CustomizableMockHttpClient mockHttpClient = new CustomizableMockHttpClient();
+                CustomizableMockHttpClient.Responder sentinal = defaultChangesResponder();
+                Queue<CustomizableMockHttpClient.Responder> responders = new LinkedList<CustomizableMockHttpClient.Responder>();
+                responders.add(defaultChangesResponder());
+                responders.add(CustomizableMockHttpClient.transientErrorResponder(errorCode, statusMessage));
+                ResponderChain responderChain = new ResponderChain(responders, sentinal);
+                mockHttpClient.setResponder("_changes", responderChain);
+                return mockHttpClient;
+            }
+
+            private CustomizableMockHttpClient.Responder defaultChangesResponder() {
+                return new CustomizableMockHttpClient.Responder() {
+                    @Override
+                    public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
+                        String json = "{\"results\":[\n" +
+                                "{\"seq\":\"1\",\"id\":\"doc1-138\",\"changes\":[{\"rev\":\"1-82d\"}]}],\n" +
+                                "\"last_seq\":\"*:50\"}";
+                        return CustomizableMockHttpClient.generateHttpResponseObject(json);
+                    }
+                };
+            }
+
+        };
+
+        final ChangeTracker changeTracker = new ChangeTracker(testURL, mode, false, 0, client);
+        changeTracker.setUsePOST(isTestingAgainstSyncGateway());
+        changeTracker.start();
+
+        try {
+            boolean success = changeReceivedSignal.await(30, TimeUnit.SECONDS);
+            assertTrue(success);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        changeTracker.stop();
+
+        try {
+            boolean success = changeTrackerFinishedSignal.await(30, TimeUnit.SECONDS);
+            assertTrue(success);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
     }
 
     private void testChangeTrackerBackoff(final CustomizableMockHttpClient mockHttpClient) throws Throwable {
@@ -252,7 +281,7 @@ public class ChangeTrackerTest extends LiteTestCase {
         };
 
         final ChangeTracker changeTracker = new ChangeTracker(testURL, ChangeTracker.ChangeTrackerMode.LongPoll, false, 0, client);
-
+        changeTracker.setUsePOST(isTestingAgainstSyncGateway());
         changeTracker.start();
 
         // sleep for a few seconds
@@ -290,6 +319,55 @@ public class ChangeTrackerTest extends LiteTestCase {
             e.printStackTrace();
         }
 
+
+    }
+
+    // ChangeTrackerMode.Continuous mode does not work, do not use it.
+    public void failingTestChangeTrackerContinuous() throws Throwable {
+
+        final CountDownLatch changeTrackerFinishedSignal = new CountDownLatch(1);
+        final CountDownLatch changeReceivedSignal = new CountDownLatch(1);
+
+        URL testURL = getReplicationURL();
+
+        ChangeTrackerClient client = new ChangeTrackerClient() {
+
+            @Override
+            public void changeTrackerStopped(ChangeTracker tracker) {
+                changeTrackerFinishedSignal.countDown();
+            }
+
+            @Override
+            public void changeTrackerReceivedChange(Map<String, Object> change) {
+                Object seq = change.get("seq");
+                changeReceivedSignal.countDown();
+            }
+
+            @Override
+            public HttpClient getHttpClient() {
+                return new DefaultHttpClient();
+            }
+        };
+
+        final ChangeTracker changeTracker = new ChangeTracker(testURL, ChangeTracker.ChangeTrackerMode.Continuous, false, 0, client);
+        changeTracker.setUsePOST(isTestingAgainstSyncGateway());
+        changeTracker.start();
+
+        try {
+            boolean success = changeReceivedSignal.await(300, TimeUnit.SECONDS);
+            assertTrue(success);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        changeTracker.stop();
+
+        try {
+            boolean success = changeTrackerFinishedSignal.await(300, TimeUnit.SECONDS);
+            assertTrue(success);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
 
     }
 

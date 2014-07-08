@@ -17,8 +17,12 @@
 
 package com.couchbase.lite;
 
+import com.couchbase.lite.internal.AttachmentInternal;
 import com.couchbase.lite.internal.RevisionInternal;
+import com.couchbase.lite.storage.ContentValues;
+import com.couchbase.lite.storage.SQLException;
 import com.couchbase.lite.support.Base64;
+import com.couchbase.lite.util.Log;
 import com.couchbase.lite.util.TextUtils;
 
 import junit.framework.Assert;
@@ -62,6 +66,18 @@ public class AttachmentsTest extends LiteTestCase {
         byte[] attach1 = "This is the body of attach1".getBytes();
         database.insertAttachmentForSequenceWithNameAndType(new ByteArrayInputStream(attach1), rev1.getSequence(), testAttachmentName, "text/plain", rev1.getGeneration());
         Assert.assertEquals(Status.CREATED, status.getCode());
+
+        //We must set the no_attachments column for the rev to false, as we are using an internal
+        //private API call above (database.insertAttachmentForSequenceWithNameAndType) which does
+        //not set the no_attachments column on revs table
+        try {
+            ContentValues args = new ContentValues();
+            args.put("no_attachments=", false);
+            database.getDatabase().update("revs", args, "sequence=?", new String[] {String.valueOf(rev1.getSequence())});
+        } catch (SQLException e) {
+            Log.e(Database.TAG, "Error setting rev1 no_attachments to false", e);
+            throw new CouchbaseLiteException(Status.INTERNAL_SERVER_ERROR);
+        }
 
         Attachment attachment = database.getAttachmentForSequence(rev1.getSequence(), testAttachmentName);
         Assert.assertEquals("text/plain", attachment.getContentType());
@@ -129,6 +145,15 @@ public class AttachmentsTest extends LiteTestCase {
         data = IOUtils.toByteArray(attachment3.getContent());
         Assert.assertTrue(Arrays.equals(attach2, data));
 
+        Map<String,Object> attachmentDictForRev3 = (Map<String,Object>)database.getAttachmentsDictForSequenceWithContent(rev3.getSequence(), EnumSet.noneOf(Database.TDContentOptions.class)).get(testAttachmentName);
+        if (attachmentDictForRev3.containsKey("follows")) {
+            if (((Boolean)attachmentDictForRev3.get("follows")).booleanValue() == true) {
+                throw new RuntimeException("Did not expected attachment dict 'follows' key to be true");
+            } else {
+                throw new RuntimeException("Did not expected attachment dict to have 'follows' key");
+            }
+        }
+
         // Examine the attachment store:
         Assert.assertEquals(2, attachments.count());
         Set<BlobKey> expected = new HashSet<BlobKey>();
@@ -190,12 +215,12 @@ public class AttachmentsTest extends LiteTestCase {
 
         Map<String,Object> innerDict = (Map<String,Object>) attachmentDictForSequence.get(testAttachmentName);
 
-        if (!innerDict.containsKey("stub")) {
-            throw new RuntimeException("Expected attachment dict to have 'stub' key");
-        }
-
-        if (((Boolean)innerDict.get("stub")).booleanValue() == false) {
-            throw new RuntimeException("Expected attachment dict 'stub' key to be true");
+        if (innerDict.containsKey("stub")) {
+            if (((Boolean)innerDict.get("stub")).booleanValue() == true) {
+                throw new RuntimeException("Did not expected attachment dict 'stub' key to be true");
+            } else {
+                throw new RuntimeException("Did not expected attachment dict to have 'stub' key");
+            }
         }
 
         if (!innerDict.containsKey("follows")) {
@@ -307,8 +332,13 @@ public class AttachmentsTest extends LiteTestCase {
         // Update the attachment directly:
         byte[] attachv2 = "Replaced body of attach".getBytes();
         boolean gotExpectedErrorCode = false;
+
+        BlobStoreWriter blobWriter = new BlobStoreWriter(database.getAttachments());
+        blobWriter.appendData(attachv2);
+        blobWriter.finish();
+
         try {
-            database.updateAttachment(testAttachmentName, new ByteArrayInputStream(attachv2), "application/foo", rev1.getDocId(), null);
+            database.updateAttachment(testAttachmentName, blobWriter, "application/foo", AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, rev1.getDocId(), null);
         } catch (CouchbaseLiteException e) {
             gotExpectedErrorCode = (e.getCBLStatus().getCode() == Status.CONFLICT);
         }
@@ -316,7 +346,7 @@ public class AttachmentsTest extends LiteTestCase {
 
         gotExpectedErrorCode = false;
         try {
-            database.updateAttachment(testAttachmentName, new ByteArrayInputStream(attachv2), "application/foo", rev1.getDocId(), "1-bogus");
+            database.updateAttachment(testAttachmentName, blobWriter, "application/foo", AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, rev1.getDocId(), "1-bogus");
         } catch (CouchbaseLiteException e) {
             gotExpectedErrorCode = (e.getCBLStatus().getCode() == Status.CONFLICT);
         }
@@ -325,7 +355,7 @@ public class AttachmentsTest extends LiteTestCase {
         gotExpectedErrorCode = false;
         RevisionInternal rev2 = null;
         try {
-            rev2 = database.updateAttachment(testAttachmentName, new ByteArrayInputStream(attachv2), "application/foo", rev1.getDocId(), rev1.getRevId());
+            rev2 = database.updateAttachment(testAttachmentName, blobWriter, "application/foo", AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, rev1.getDocId(), rev1.getRevId());
         } catch (CouchbaseLiteException e) {
             gotExpectedErrorCode = true;
         }
@@ -333,6 +363,7 @@ public class AttachmentsTest extends LiteTestCase {
 
         Assert.assertEquals(rev1.getDocId(), rev2.getDocId());
         Assert.assertEquals(2, rev2.getGeneration());
+
 
         // Get the updated revision:
         RevisionInternal gotRev2 = database.getDocumentWithIDAndRev(rev2.getDocId(), rev2.getRevId(), EnumSet.noneOf(Database.TDContentOptions.class));
@@ -352,7 +383,7 @@ public class AttachmentsTest extends LiteTestCase {
         // Delete the attachment:
         gotExpectedErrorCode = false;
         try {
-            database.updateAttachment("nosuchattach", null, null, rev2.getDocId(), rev2.getRevId());
+            database.updateAttachment("nosuchattach", null, null, AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, rev2.getDocId(), rev2.getRevId());
         } catch (CouchbaseLiteException e) {
             gotExpectedErrorCode = (e.getCBLStatus().getCode() == Status.NOT_FOUND);
         }
@@ -360,14 +391,14 @@ public class AttachmentsTest extends LiteTestCase {
 
         gotExpectedErrorCode = false;
         try {
-            database.updateAttachment("nosuchattach", null, null, "nosuchdoc", "nosuchrev");
+            database.updateAttachment("nosuchattach", null, null, AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, "nosuchdoc", "nosuchrev");
         } catch (CouchbaseLiteException e) {
             gotExpectedErrorCode = (e.getCBLStatus().getCode() == Status.NOT_FOUND);
         }
         Assert.assertTrue(gotExpectedErrorCode);
 
 
-        RevisionInternal rev3 = database.updateAttachment(testAttachmentName, null, null, rev2.getDocId(), rev2.getRevId());
+        RevisionInternal rev3 = database.updateAttachment(testAttachmentName, null, null, AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone, rev2.getDocId(), rev2.getRevId());
         Assert.assertEquals(rev2.getDocId(), rev3.getDocId());
         Assert.assertEquals(3, rev3.getGeneration());
 
@@ -400,8 +431,6 @@ public class AttachmentsTest extends LiteTestCase {
         BlobKey blobKey = new BlobKey(sha1Base64Digest);
         byte[] blob = attachments.blobForKey(blobKey);
         Assert.assertTrue(Arrays.equals(testBlob.getBytes(Charset.forName("UTF-8")), blob));
-
-
     }
 
     /**

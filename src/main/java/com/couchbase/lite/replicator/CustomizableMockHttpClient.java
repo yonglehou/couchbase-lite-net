@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class CustomizableMockHttpClient implements org.apache.http.client.HttpClient {
 
@@ -36,7 +37,7 @@ public class CustomizableMockHttpClient implements org.apache.http.client.HttpCl
     private Map<String, Responder> responders;
 
     // capture all request so that the test can verify expected requests were received.
-    private List<HttpRequest> capturedRequests = Collections.synchronizedList(new ArrayList<HttpRequest>());
+    private List<HttpRequest> capturedRequests = new CopyOnWriteArrayList<HttpRequest>();
 
     // if this is set, it will delay responses by this number of milliseconds
     private long responseDelayMilliseconds;
@@ -97,14 +98,32 @@ public class CustomizableMockHttpClient implements org.apache.http.client.HttpCl
         });
     }
 
+    public void addResponderFakeLocalDocumentUpdate401() {
+        responders.put("_local", getFakeLocalDocumentUpdate401());
+    }
+
+    public Responder getFakeLocalDocumentUpdate401() {
+        return new Responder() {
+            @Override
+            public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
+                String json = "{\"error\":\"Unauthorized\",\"reason\":\"Login required\"}";
+                return CustomizableMockHttpClient.generateHttpResponseObject(401, "Unauthorized", json);
+            }
+        };
+    }
+
     public void addResponderFakeLocalDocumentUpdate404() {
-        responders.put("_local", new CustomizableMockHttpClient.Responder() {
+        responders.put("_local", getFakeLocalDocumentUpdate404());
+    }
+
+    public Responder getFakeLocalDocumentUpdate404() {
+        return new Responder() {
             @Override
             public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
                 String json = "{\"error\":\"not_found\",\"reason\":\"missing\"}";
                 return CustomizableMockHttpClient.generateHttpResponseObject(404, "NOT FOUND", json);
             }
-        });
+        };
     }
 
     public void addResponderFakeLocalDocumentUpdateIOException() {
@@ -117,12 +136,30 @@ public class CustomizableMockHttpClient implements org.apache.http.client.HttpCl
     }
 
     public void addResponderFakeBulkDocs() {
-        responders.put("_bulk_docs", new Responder() {
+        responders.put("_bulk_docs", fakeBulkDocsResponder());
+    }
+
+    public static Responder fakeBulkDocsResponder() {
+        return new Responder() {
             @Override
             public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
                 return CustomizableMockHttpClient.fakeBulkDocs(httpUriRequest);
             }
-        });
+        };
+    }
+
+    public static Responder transientErrorResponder(final int statusCode, final String statusMsg) {
+        return new Responder() {
+            @Override
+            public HttpResponse execute(HttpUriRequest httpUriRequest) throws IOException {
+                if (statusCode == -1) {
+                    throw new IOException("Fake IO Exception from transientErrorResponder");
+                } else {
+                    return CustomizableMockHttpClient.generateHttpResponseObject(statusCode, statusMsg, null);
+                }
+
+            }
+        };
     }
 
     public void addResponderRevDiffsAllMissing() {
@@ -168,9 +205,7 @@ public class CustomizableMockHttpClient implements org.apache.http.client.HttpCl
 
 
     public List<HttpRequest> getCapturedRequests() {
-        List<HttpRequest> snapshot = new ArrayList<HttpRequest>();
-        snapshot.addAll(capturedRequests);
-        return snapshot;
+        return capturedRequests;
     }
 
     public void clearCapturedRequests() {
@@ -346,8 +381,10 @@ public class CustomizableMockHttpClient implements org.apache.http.client.HttpCl
         DefaultHttpResponseFactory responseFactory = new DefaultHttpResponseFactory();
         BasicStatusLine statusLine = new BasicStatusLine(HttpVersion.HTTP_1_1, statusCode, statusString);
         HttpResponse response = responseFactory.newHttpResponse(statusLine, null);
-        byte[] responseBytes = responseJson.getBytes();
-        response.setEntity(new ByteArrayEntity(responseBytes));
+        if (responseJson != null) {
+            byte[] responseBytes = responseJson.getBytes();
+            response.setEntity(new ByteArrayEntity(responseBytes));
+        }
         return response;
     }
 
