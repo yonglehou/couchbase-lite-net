@@ -103,17 +103,17 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
     public void start() {
 
         if (runningState.get() == true) {
-            Log.d(Database.TAG, this + ": start() called, but runningState is already true.  Ignoring.");
+            Log.v(Log.TAG_QUERY, "%s: start() called, but runningState is already true.  Ignoring.", this);
             return;
         } else {
-            Log.d(Database.TAG, this + ": start() called");
+            Log.d(Log.TAG_QUERY, "%s: start() called", this);
             runningState.set(true);
         }
 
         if (!observing) {
             observing = true;
             getDatabase().addChangeListener(this);
-            Log.d(Database.TAG, this + ": start() is calling update()");
+            Log.v(Log.TAG_QUERY, "%s: start() is calling update()", this);
             update();
         }
     }
@@ -125,10 +125,10 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
     public void stop() {
 
         if (runningState.get() == false) {
-            Log.d(Database.TAG, this + ": stop() called, but runningState is already false.  Ignoring.");
+            Log.d(Log.TAG_QUERY, "%s: stop() called, but runningState is already false.  Ignoring.", this);
             return;
         } else {
-            Log.d(Database.TAG, this + ": stop() called");
+            Log.d(Log.TAG_QUERY, "%s: stop() called", this);
             runningState.set(false);
         }
 
@@ -142,16 +142,12 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
         // with willUpdate set to false.  was needed to make testLiveQueryStop() unit test pass.
         if (queryFuture != null) {
             boolean cancelled = queryFuture.cancel(true);
-            Log.d(Database.TAG, this + ": cancelled queryFuture " + queryFuture + ", returned: " + cancelled);
-        } else {
-            Log.d(Database.TAG, this + ": not cancelling queryFuture, since it is null");
+            Log.v(Log.TAG_QUERY, "%s: cancelled queryFuture %s, returned: %s", this, queryFuture, cancelled);
         }
 
         if (rerunUpdateFuture != null) {
             boolean cancelled = rerunUpdateFuture.cancel(true);
-            Log.d(Database.TAG, this + ": cancelled rerunUpdateFuture " + rerunUpdateFuture + ", returned: " + cancelled);
-        } else {
-            Log.d(Database.TAG, this + ": not cancelling rerunUpdateFuture, since it is null");
+            Log.d(Log.TAG_QUERY, "%s: cancelled rerunUpdateFuture %s, returned: %s", this, rerunUpdateFuture, cancelled);
         }
 
     }
@@ -257,27 +253,27 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
 
     @InterfaceAudience.Private
     /* package */ void update() {
-        Log.d(Database.TAG, this + ": update() called.");
+        Log.v(Log.TAG_QUERY, "%s: update() called.", this);
 
         if (getView() == null) {
             throw new IllegalStateException("Cannot start LiveQuery when view is null");
         }
 
         if (runningState.get() == false) {
-            Log.d(Database.TAG, this + ": update() called, but running state == false.  Ignoring.");
+            Log.d(Log.TAG_QUERY, "%s: update() called, but running state == false.  Ignoring.", this);
             return;
         }
 
         if (queryFuture != null && !queryFuture.isCancelled() && !queryFuture.isDone()) {
             // There is a already a query in flight, so leave it alone except to schedule something
             // to run update() again once it finishes.
-            Log.d(Database.TAG, LiveQuery.this + ": already a query in flight, scheduling call to update() once it's done");
+            Log.d(Log.TAG_QUERY, "%s: already a query in flight, scheduling call to update() once it's done", LiveQuery.this);
             if (rerunUpdateFuture != null && !rerunUpdateFuture.isCancelled() && !rerunUpdateFuture.isDone()) {
                 boolean cancelResult = rerunUpdateFuture.cancel(true);
-                Log.d(Database.TAG, LiveQuery.this + ": cancelled " + rerunUpdateFuture + " result: " + cancelResult);
+                Log.d(Log.TAG_QUERY, "%s: cancelled %s result: %s", LiveQuery.this, rerunUpdateFuture, cancelResult);
             }
-            rerunUpdateFuture = rerunUpdateAfterQueryFinishes();
-            Log.d(Database.TAG, LiveQuery.this + ": created new rerunUpdateFuture: " + rerunUpdateFuture);
+            rerunUpdateFuture = rerunUpdateAfterQueryFinishes(queryFuture);
+            Log.d(Log.TAG_QUERY, "%s: created new rerunUpdateFuture: %s", LiveQuery.this, rerunUpdateFuture);
             return;
         }
 
@@ -291,10 +287,16 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
                     }
                     lastError = error;
                 } else {
+
+                    if (runningState.get() == false) {
+                        Log.d(Log.TAG_QUERY, "%s: update() finished query, but running state == false.", this);
+                        return;
+                    }
+
                     if (rowsParam != null && !rowsParam.equals(rows)) {
                         setRows(rowsParam);
                         for (ChangeListener observer : observers) {
-                            Log.d(Database.TAG, LiveQuery.this + ": update() calling back observer with rows");
+                            Log.d(Log.TAG_QUERY, "%s: update() calling back observer with rows", LiveQuery.this);
                             observer.changed(new ChangeEvent(LiveQuery.this, rows));
                         }
                     }
@@ -302,7 +304,7 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
                 }
             }
         });
-        Log.d(Database.TAG, this + ": update() created queryFuture: " + queryFuture);
+        Log.d(Log.TAG_QUERY, "%s: update() created queryFuture: %s", this, queryFuture);
 
     }
 
@@ -311,25 +313,31 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
      * does, it will run upate() again in case the current query in flight misses
      * some of the recently added items.
      */
-    private Future rerunUpdateAfterQueryFinishes() {
+    private Future rerunUpdateAfterQueryFinishes(final Future queryFutureInProgress) {
         return getDatabase().getManager().runAsync(new Runnable() {
             @Override
             public void run() {
 
                 if (runningState.get() == false) {
-                    Log.d(Database.TAG, this + ": rerunUpdateAfterQueryFinishes.run() fired, but running state == false.  Ignoring.");
+                    Log.v(Log.TAG_QUERY, "%s: rerunUpdateAfterQueryFinishes.run() fired, but running state == false.  Ignoring.", this);
                     return;
                 }
 
-                if (queryFuture != null) {
+                if (queryFutureInProgress != null) {
                     try {
-                        queryFuture.get();
+                        queryFutureInProgress.get();
+
+                        if (runningState.get() == false) {
+                            Log.v(Log.TAG_QUERY, "%s: queryFutureInProgress.get() done, but running state == false.", this);
+                            return;
+                        }
+
                         update();
                     } catch (Exception e) {
                         if (e instanceof CancellationException) {
                             // can safely ignore these
                         } else {
-                            Log.e(Database.TAG, "Got exception waiting for queryFuture to finish", e);
+                            Log.e(Log.TAG_QUERY, "Got exception waiting for queryFutureInProgress to finish", e);
                         }
                     }
                 }
@@ -344,7 +352,6 @@ public final class LiveQuery extends Query implements Database.ChangeListener {
     @Override
     @InterfaceAudience.Private
     public void changed(Database.ChangeEvent event) {
-        Log.d(Database.TAG, this + ": changed() called");
         update();
     }
 

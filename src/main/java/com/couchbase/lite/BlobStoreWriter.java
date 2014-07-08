@@ -86,8 +86,8 @@ public class BlobStoreWriter {
         try {
             while ((len = inputStream.read(buffer)) != -1) {
                 outStream.write(buffer, 0, len);
-                sha1Digest.update(buffer);
-                md5Digest.update(buffer);
+                sha1Digest.update(buffer, 0, len);
+                md5Digest.update(buffer, 0, len);
                 length += len;
             }
         } catch (IOException e) {
@@ -96,7 +96,7 @@ public class BlobStoreWriter {
             try {
                 inputStream.close();
             } catch (IOException e) {
-                Log.w(Database.TAG, "Exception closing input stream", e);
+                Log.w(Log.TAG_BLOB_STORE, "Exception closing input stream", e);
             }
         }
     }
@@ -106,7 +106,7 @@ public class BlobStoreWriter {
         try {
             outStream.close();
         } catch (IOException e) {
-            Log.w(Database.TAG, "Exception closing output stream", e);
+            Log.w(Log.TAG_BLOB_STORE, "Exception closing output stream", e);
         }
         blobKey = new BlobKey(sha1Digest.digest());
         md5DigestResult = md5Digest.digest();
@@ -117,7 +117,7 @@ public class BlobStoreWriter {
         try {
             outStream.close();
         } catch (IOException e) {
-            Log.w(Database.TAG, "Exception closing output stream", e);
+            Log.w(Log.TAG_BLOB_STORE, "Exception closing output stream", e);
         }
         tempFile.delete();
     }
@@ -161,4 +161,6 @@ public class BlobStoreWriter {
     public BlobKey getBlobKey() {
         return blobKey;
     }
+
+    public String getFilePath() { return tempFile.getPath(); }
 }

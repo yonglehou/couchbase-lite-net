@@ -3,8 +3,12 @@ package com.couchbase.lite.auth;
 import java.net.URL;
 import java.util.Map;
 
-public class Authorizer {
-
+/**
+ * Authorizers should extend from this class
+ *
+ * @exclude
+ */
+public class Authorizer extends AuthenticatorImpl {
 
     public boolean usesCookieBasedLogin() {
         return false;
