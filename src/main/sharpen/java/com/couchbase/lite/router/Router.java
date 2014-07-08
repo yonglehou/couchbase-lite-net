@@ -3,32 +3,38 @@ package com.couchbase.lite.router;
 
 import com.couchbase.lite.AsyncTask;
 import com.couchbase.lite.Attachment;
+import com.couchbase.lite.BlobStoreWriter;
 import com.couchbase.lite.ChangesOptions;
 import com.couchbase.lite.CouchbaseLiteException;
 import com.couchbase.lite.Database;
 import com.couchbase.lite.Database.TDContentOptions;
 import com.couchbase.lite.DocumentChange;
 import com.couchbase.lite.Manager;
+import com.couchbase.lite.Mapper;
 import com.couchbase.lite.Misc;
 import com.couchbase.lite.QueryOptions;
 import com.couchbase.lite.QueryRow;
 import com.couchbase.lite.Reducer;
 import com.couchbase.lite.ReplicationFilter;
-import com.couchbase.lite.Mapper;
 import com.couchbase.lite.RevisionList;
 import com.couchbase.lite.Status;
 import com.couchbase.lite.View;
 import com.couchbase.lite.View.TDViewCollation;
 import com.couchbase.lite.auth.FacebookAuthorizer;
 import com.couchbase.lite.auth.PersonaAuthorizer;
+import com.couchbase.lite.internal.AttachmentInternal;
 import com.couchbase.lite.internal.Body;
 import com.couchbase.lite.internal.RevisionInternal;
 import com.couchbase.lite.replicator.Replication;
+import com.couchbase.lite.storage.SQLException;
+import com.couchbase.lite.support.Version;
 import com.couchbase.lite.util.Log;
+import com.couchbase.lite.util.StreamUtils;
 
 import org.apache.http.client.HttpResponseException;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -64,7 +70,7 @@ public class Router implements Database.ChangeListener {
     private boolean longpoll = false;
 
     public static String getVersionString() {
-        return Manager.VERSION;
+        return Version.getVersion();
     }
 
     public Router(Manager manager, URLConnection connection) {
@@ -160,7 +166,7 @@ public class Router implements Database.ChangeListener {
             Map<String,Object> bodyMap = Manager.getObjectMapper().readValue(contentStream, Map.class);
             return bodyMap;
         } catch (IOException e) {
-            Log.w(Database.TAG, "WARNING: Exception parsing body into dictionary", e);
+            Log.w(Log.TAG_ROUTER, "WARNING: Exception parsing body into dictionary", e);
             return null;
         }
     }
@@ -225,6 +231,13 @@ public class Router implements Database.ChangeListener {
         else {
             options.setStartKey(getJSONQuery("startkey"));
             options.setEndKey(getJSONQuery("endkey"));
+            if (getJSONQuery("startkey_docid") != null) {
+                options.setStartKeyDocId(getJSONQuery("startkey_docid").toString());
+            }
+            if (getJSONQuery("endkey_docid") != null) {
+                options.setEndKeyDocId(getJSONQuery("endkey_docid").toString());
+            }
+
         }
 
         return true;
@@ -294,7 +307,7 @@ public class Router implements Database.ChangeListener {
             try {
                 connection.getResponseOutputStream().close();
             } catch (IOException e) {
-                Log.e(Database.TAG, "Error closing empty output stream");
+                Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
             }
             sendResponse();
             return;
@@ -323,7 +336,7 @@ public class Router implements Database.ChangeListener {
                     try {
                         connection.getResponseOutputStream().close();
                     } catch (IOException e) {
-                        Log.e(Database.TAG, "Error closing empty output stream");
+                        Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                     }
                     sendResponse();
                     return;
@@ -336,7 +349,7 @@ public class Router implements Database.ChangeListener {
                         try {
                             connection.getResponseOutputStream().close();
                         } catch (IOException e) {
-                            Log.e(Database.TAG, "Error closing empty output stream");
+                            Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                         }
                         sendResponse();
                         return;
@@ -358,7 +371,7 @@ public class Router implements Database.ChangeListener {
                 try {
                     connection.getResponseOutputStream().close();
                 } catch (IOException e) {
-                    Log.e(Database.TAG, "Error closing empty output stream");
+                    Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                 }
                 sendResponse();
                 return;
@@ -371,7 +384,7 @@ public class Router implements Database.ChangeListener {
                     try {
                         connection.getResponseOutputStream().close();
                     } catch (IOException e) {
-                        Log.e(Database.TAG, "Error closing empty output stream");
+                        Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                     }
                     sendResponse();
                     return;
@@ -384,7 +397,7 @@ public class Router implements Database.ChangeListener {
                     try {
                         connection.getResponseOutputStream().close();
                     } catch (IOException e) {
-                        Log.e(Database.TAG, "Error closing empty output stream");
+                        Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                     }
                     sendResponse();
                     return;
@@ -452,8 +465,8 @@ public class Router implements Database.ChangeListener {
 
         } catch (NoSuchMethodException msme) {
             try {
-                String errorMessage = "Router unable to route request to " + message;
-                Log.e(Database.TAG, errorMessage);
+                String errorMessage = String.format("Router unable to route request to %s", message);
+                Log.e(Log.TAG_ROUTER, errorMessage);
                 Map<String, Object> result = new HashMap<String, Object>();
                 result.put("error", "not_found");
                 result.put("reason", errorMessage);
@@ -462,7 +475,7 @@ public class Router implements Database.ChangeListener {
                 status = (Status)m.invoke(this, db, docID, attachmentName);
             } catch (Exception e) {
                 //default status is internal server error
-                Log.e(Database.TAG, "Router attempted do_UNKNWON fallback, but that threw an exception", e);
+                Log.e(Log.TAG_ROUTER, "Router attempted do_UNKNWON fallback, but that threw an exception", e);
                 Map<String, Object> result = new HashMap<String, Object>();
                 result.put("error", "not_found");
                 result.put("reason", "Router unable to route request");
@@ -471,7 +484,7 @@ public class Router implements Database.ChangeListener {
             }
         } catch (Exception e) {
             String errorMessage = "Router unable to route request to " + message;
-            Log.e(Database.TAG, errorMessage, e);
+            Log.e(Log.TAG_ROUTER, errorMessage, e);
             Map<String, Object> result = new HashMap<String, Object>();
             result.put("error", "not_found");
             result.put("reason", errorMessage + e.toString());
@@ -501,7 +514,7 @@ public class Router implements Database.ChangeListener {
                 resHeader.add("Content-Type", "application/json");
             }
             else {
-                Log.w(Database.TAG, "Cannot add Content-Type header because getResHeader() returned null");
+                Log.w(Log.TAG_ROUTER, "Cannot add Content-Type header because getResHeader() returned null");
             }
         }
 
@@ -510,7 +523,7 @@ public class Router implements Database.ChangeListener {
         if(accept != null && !"*/*".equals(accept)) {
             String responseType = connection.getBaseContentType();
             if(responseType != null && accept.indexOf(responseType) < 0) {
-                Log.e(Database.TAG, String.format("Error 406: Can't satisfy request Accept: %s", accept));
+                Log.e(Log.TAG_ROUTER, "Error 406: Can't satisfy request Accept: %s", accept);
                 status = new Status(Status.NOT_ACCEPTABLE);
             }
         }
@@ -529,7 +542,7 @@ public class Router implements Database.ChangeListener {
                 try {
                     connection.getResponseOutputStream().close();
                 } catch (IOException e) {
-                    Log.e(Database.TAG, "Error closing empty output stream");
+                    Log.e(Log.TAG_ROUTER, "Error closing empty output stream");
                 }
             }
             sendResponse();
@@ -552,7 +565,7 @@ public class Router implements Database.ChangeListener {
     /*************************************************************************************************/
 
     public void setResponseLocation(URL url) {
-        String location = url.toExternalForm();
+        String location = url.getPath();
         String query = url.getQuery();
         if(query != null) {
             int startOfQuery = location.indexOf(query);
@@ -670,7 +683,7 @@ public class Router implements Database.ChangeListener {
                     if (replicator.getLastError() != null) {
                         String msg = String.format("Replicator error: %s.  Repl: %s.  Source: %s, Target: %s",
                                 replicator.getLastError(), replicator, source, target);
-                        Log.e(Database.TAG, msg);
+                        Log.e(Log.TAG_ROUTER, msg);
                         Throwable error = replicator.getLastError();
                         int statusCode = 400;
                         if (error instanceof HttpResponseException) {
@@ -737,8 +750,10 @@ public class Router implements Database.ChangeListener {
     private void convertCBLQueryRowsToMaps(Map<String,Object> allDocsResult) {
         List<Map<String, Object>> rowsAsMaps = new ArrayList<Map<String, Object>>();
         List<QueryRow> rows = (List<QueryRow>) allDocsResult.get("rows");
-        for (QueryRow row : rows) {
-            rowsAsMaps.add(row.asJSONDictionary());
+        if (rows != null) {
+            for (QueryRow row : rows) {
+                rowsAsMaps.add(row.asJSONDictionary());
+            }
         }
         allDocsResult.put("rows", rowsAsMaps);
     }
@@ -934,14 +949,13 @@ public class Router implements Database.ChangeListener {
                     results.add(result);
                 }
             }
-            Log.w(Database.TAG, String.format("%s finished inserting %d revisions in bulk", this, docs.size()));
+            Log.w(Log.TAG_ROUTER, "%s finished inserting %d revisions in bulk", this, docs.size());
             ok = true;
         } catch (Exception e) {
-            Log.e(Database.TAG, String.format("%s: Exception inserting revisions in bulk", this), e);
+            Log.e(Log.TAG_ROUTER, "%s: Exception inserting revisions in bulk", e, this);
         } finally {
             db.endTransaction(ok);
         }
-        Log.d(Database.TAG, "results: " + results.toString());
         connection.setResponseBody(new Body(results));
         return new Status(Status.CREATED);
     }
@@ -963,7 +977,10 @@ public class Router implements Database.ChangeListener {
         }
 
         // Look them up, removing the existing ones from revs:
-        if(!db.findMissingRevisions(revs)) {
+        try {
+            db.findMissingRevisions(revs);
+        } catch (SQLException e) {
+            Log.e(Log.TAG_ROUTER, "Exception", e);
             return new Status(Status.DB_ERROR);
         }
 
@@ -1044,13 +1061,13 @@ public class Router implements Database.ChangeListener {
         try {
             future.get(60, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
-            Log.e(Database.TAG, "Exception waiting for future", e);
+            Log.e(Log.TAG_ROUTER, "Exception waiting for future", e);
             return new Status(Status.INTERNAL_SERVER_ERROR);
         } catch (ExecutionException e) {
-            Log.e(Database.TAG, "Exception waiting for future", e);
+            Log.e(Log.TAG_ROUTER, "Exception waiting for future", e);
             return new Status(Status.INTERNAL_SERVER_ERROR);
         } catch (TimeoutException e) {
-            Log.e(Database.TAG, "Exception waiting for future", e);
+            Log.e(Log.TAG_ROUTER, "Exception waiting for future", e);
             return new Status(Status.INTERNAL_SERVER_ERROR);
         }
 
@@ -1128,9 +1145,14 @@ public class Router implements Database.ChangeListener {
            }
         });
 
-        Long lastSeq = (Long)entries.get(entries.size() - 1).get("seq");
-        if(lastSeq == null) {
+        Long lastSeq;
+        if (entries.size() == 0){
             lastSeq = since;
+        } else {
+            lastSeq = (Long)entries.get(entries.size() - 1).get("seq");
+            if(lastSeq == null) {
+                lastSeq = since;
+            }
         }
 
         Map<String,Object> result = new HashMap<String,Object>();
@@ -1150,7 +1172,7 @@ public class Router implements Database.ChangeListener {
                     os.write(json);
                     os.flush();
                 } catch (Exception e) {
-                    Log.e(Database.TAG, "IOException writing to internal streams", e);
+                    Log.e(Log.TAG_ROUTER, "IOException writing to internal streams", e);
                 }
             }
         } catch (Exception e) {
@@ -1173,7 +1195,7 @@ public class Router implements Database.ChangeListener {
             }
 
             if(longpoll) {
-                Log.w(Database.TAG, "Router: Sending longpoll response");
+                Log.w(Log.TAG_ROUTER, "Router: Sending longpoll response");
                 sendResponse();
                 List<RevisionInternal> revs = new ArrayList<RevisionInternal>();
                 revs.add(rev);
@@ -1183,18 +1205,18 @@ public class Router implements Database.ChangeListener {
                     try {
                         data = Manager.getObjectMapper().writeValueAsBytes(body);
                     } catch (Exception e) {
-                        Log.w(Database.TAG, "Error serializing JSON", e);
+                        Log.w(Log.TAG_ROUTER, "Error serializing JSON", e);
                     }
                     OutputStream os = connection.getResponseOutputStream();
                     try {
                         os.write(data);
                         os.close();
                     } catch (IOException e) {
-                        Log.e(Database.TAG, "IOException writing to internal streams", e);
+                        Log.e(Log.TAG_ROUTER, "IOException writing to internal streams", e);
                     }
                 }
             } else {
-                Log.w(Database.TAG, "Router: Sending continous change chunk");
+                Log.w(Log.TAG_ROUTER, "Router: Sending continous change chunk");
                 sendContinuousChange(rev);
             }
 
@@ -1468,7 +1490,7 @@ public class Router implements Database.ChangeListener {
 
         } catch (CouchbaseLiteException e) {
             e.printStackTrace();
-            Log.e(Database.TAG, e.toString());
+            Log.e(Log.TAG_ROUTER, "Error updating doc: %s", e, docID);
             outStatus.setCode(e.getCBLStatus().getCode());
         }
 
@@ -1553,7 +1575,19 @@ public class Router implements Database.ChangeListener {
         if(revID == null) {
             revID = getRevIDFromIfMatchHeader();
         }
-        RevisionInternal rev = db.updateAttachment(attachment, contentStream, connection.getRequestProperty("content-type"),
+
+        BlobStoreWriter body = new BlobStoreWriter(db.getAttachments());
+        ByteArrayOutputStream dataStream = new ByteArrayOutputStream();
+
+        try{
+            StreamUtils.copyStream(contentStream,dataStream);
+            body.appendData(dataStream.toByteArray());
+            body.finish();
+        } catch (IOException e) {
+            throw new CouchbaseLiteException(Status.BAD_ATTACHMENT);
+        }
+
+        RevisionInternal rev = db.updateAttachment(attachment, body, connection.getRequestProperty("content-type"), AttachmentInternal.AttachmentEncoding.AttachmentEncodingNone,
                 docID, revID);
         Map<String, Object> resultDict = new HashMap<String, Object>();
         resultDict.put("ok", true);
@@ -1588,7 +1622,7 @@ public class Router implements Database.ChangeListener {
         }
         Mapper mapBlock = View.getCompiler().compileMap(mapSource, language);
         if(mapBlock == null) {
-            Log.w(Database.TAG, String.format("View %s has unknown map function: %s", viewName, mapSource));
+            Log.w(Log.TAG_ROUTER, "View %s has unknown map function: %s", viewName, mapSource);
             return null;
         }
         String reduceSource = (String)viewProps.get("reduce");
@@ -1596,7 +1630,7 @@ public class Router implements Database.ChangeListener {
         if(reduceSource != null) {
             reduceBlock = View.getCompiler().compileReduce(reduceSource, language);
             if(reduceBlock == null) {
-                Log.w(Database.TAG, String.format("View %s has unknown reduce function: %s", viewName, reduceBlock));
+                Log.w(Log.TAG_ROUTER, "View %s has unknown reduce function: %s", viewName, reduceBlock);
                 return null;
             }
         }

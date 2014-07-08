@@ -74,7 +74,7 @@
 	  	-->
         <!-- classpath needed for java sources compilation -->
         <arg value="-cp" />
-		<arg path="/Users/zgramana/Library/Developer/Xamarin/android-sdk-mac_x86/platforms/android-18/android.jar" />
+		<arg path="/Users/pasin/ADT/sdk/platforms/android-19/android.jar" />
 		<arg value="-cp" />
 		<arg path="../../libs/commons-io-2.4.jar" />
 		<arg value="-cp" />

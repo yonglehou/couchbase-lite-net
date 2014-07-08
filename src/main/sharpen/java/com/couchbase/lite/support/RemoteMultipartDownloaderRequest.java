@@ -28,7 +28,7 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
     public RemoteMultipartDownloaderRequest(ScheduledExecutorService workExecutor,
                                             HttpClientFactory clientFactory, String method, URL url,
                                             Object body, Database db, Map<String, Object> requestHeaders, RemoteRequestCompletionBlock onCompletion) {
-        super(workExecutor, clientFactory, method, url, body, requestHeaders, onCompletion);
+        super(workExecutor, clientFactory, method, url, body, db, requestHeaders, onCompletion);
         this.db = db;
     }
 
@@ -38,8 +38,6 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
         HttpClient httpClient = clientFactory.getHttpClient();
 
         preemptivelySetAuthCredentials(httpClient);
-
-        HttpUriRequest request = createConcreteRequest();
 
         request.addHeader("Accept", "*/*");
 
@@ -52,28 +50,30 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
     protected void executeRequest(HttpClient httpClient, HttpUriRequest request) {
         Object fullBody = null;
         Throwable error = null;
+        HttpResponse response = null;
 
         try {
 
-            HttpResponse response = httpClient.execute(request);
+            if (request.isAborted()) {
+                respondWithResult(fullBody, new Exception(String.format("%s: Request %s has been aborted", this, request)), response);
+                return;
+            }
+
+            response = httpClient.execute(request);
 
             try {
                 // add in cookies to global store
                 if (httpClient instanceof DefaultHttpClient) {
                     DefaultHttpClient defaultHttpClient = (DefaultHttpClient)httpClient;
-                    CouchbaseLiteHttpClientFactory.INSTANCE.addCookies(defaultHttpClient.getCookieStore().getCookies());
+                    this.clientFactory.addCookies(defaultHttpClient.getCookieStore().getCookies());
                 }
             } catch (Exception e) {
-                Log.e(Database.TAG, "Unable to add in cookies to global store", e);
+                Log.e(Log.TAG_REMOTE_REQUEST, "Unable to add in cookies to global store", e);
             }
 
             StatusLine status = response.getStatusLine();
             if (status.getStatusCode() >= 300) {
-                Log.e(Database.TAG,
-                        "Got error " + Integer.toString(status.getStatusCode()));
-                Log.e(Database.TAG, "Request was for: " + request.toString());
-                Log.e(Database.TAG,
-                        "Status reason: " + status.getReasonPhrase());
+                Log.e(Log.TAG_REMOTE_REQUEST, "Got error status: %d for %s.  Reason: %s", status.getStatusCode(), request, status.getReasonPhrase());
                 error = new HttpResponseException(status.getStatusCode(),
                         status.getReasonPhrase());
             } else {
@@ -106,7 +106,7 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
                         reader.finish();
                         fullBody = reader.getDocumentProperties();
 
-                        respondWithResult(fullBody, error);
+                        respondWithResult(fullBody, error, response);
 
                     } finally {
                         try {
@@ -123,7 +123,7 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
                             inputStream = entity.getContent();
                             fullBody = Manager.getObjectMapper().readValue(inputStream,
                                     Object.class);
-                            respondWithResult(fullBody, error);
+                            respondWithResult(fullBody, error, response);
                         } finally {
                             try {
                                 inputStream.close();
@@ -134,12 +134,16 @@ public class RemoteMultipartDownloaderRequest extends RemoteRequest {
 
                 }
             }
-        } catch (ClientProtocolException e) {
-            Log.e(Database.TAG, "client protocol exception", e);
-            error = e;
         } catch (IOException e) {
-            Log.e(Database.TAG, "io exception", e);
+            Log.e(Log.TAG_REMOTE_REQUEST, "%s: io exception", e, this);
             error = e;
+            respondWithResult(fullBody, e, response);
+        } catch (Exception e) {
+            Log.e(Log.TAG_REMOTE_REQUEST, "%s: executeRequest() Exception: ", e, this);
+            error = e;
+            respondWithResult(fullBody, e, response);
+        } finally {
+            Log.e(Log.TAG_REMOTE_REQUEST, "%s: executeRequest() finally", this);
         }
     }
 

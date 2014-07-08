@@ -25,7 +25,9 @@ import com.couchbase.lite.storage.ContentValues;
 import com.couchbase.lite.storage.Cursor;
 import com.couchbase.lite.storage.SQLException;
 import com.couchbase.lite.storage.SQLiteStorageEngine;
+import com.couchbase.lite.support.JsonDocument;
 import com.couchbase.lite.util.Log;
+import com.couchbase.lite.util.Utils;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -136,14 +138,12 @@ public final class View {
         Cursor cursor = null;
         long result = -1;
         try {
-            Log.d(Database.TAG_SQL, Thread.currentThread().getName() + " start running query: " + sql);
             cursor = database.getDatabase().rawQuery(sql, args);
-            Log.d(Database.TAG_SQL, Thread.currentThread().getName() + " finish running query: " + sql);
             if (cursor.moveToNext()) {
                 result = cursor.getLong(0);
             }
         } catch (Exception e) {
-            Log.e(Database.TAG, "Error getting last sequence indexed", e);
+            Log.e(Log.TAG_VIEW, "Error getting last sequence indexed", e);
         } finally {
             if (cursor != null) {
                 cursor.close();
@@ -231,7 +231,7 @@ public final class View {
 
             return (rowsAffected > 0);
         } catch (SQLException e) {
-            Log.e(Database.TAG, "Error setting map block", e);
+            Log.e(Log.TAG_VIEW, "Error setting map block", e);
             return false;
         } finally {
             if (cursor != null) {
@@ -265,7 +265,7 @@ public final class View {
 
             success = true;
         } catch (SQLException e) {
-            Log.e(Database.TAG, "Error removing index", e);
+            Log.e(Log.TAG_VIEW, "Error removing index", e);
         } finally {
             database.endTransaction(success);
         }
@@ -305,7 +305,7 @@ public final class View {
                     viewId = 0;
                 }
             } catch (SQLException e) {
-                Log.e(Database.TAG, "Error getting view id", e);
+                Log.e(Log.TAG_VIEW, "Error getting view id", e);
                 viewId = 0;
             } finally {
                 if (cursor != null) {
@@ -339,24 +339,7 @@ public final class View {
         try {
             result = Manager.getObjectMapper().writeValueAsString(object);
         } catch (Exception e) {
-            Log.w(Database.TAG, "Exception serializing object to json: " + object, e);
-        }
-        return result;
-    }
-
-    /**
-     * @exclude
-     */
-    @InterfaceAudience.Private
-    public Object fromJSON(byte[] json) {
-        if (json == null) {
-            return null;
-        }
-        Object result = null;
-        try {
-            result = Manager.getObjectMapper().readValue(json, Object.class);
-        } catch (Exception e) {
-            Log.w(Database.TAG, "Exception parsing json", e);
+            Log.w(Log.TAG_VIEW, "Exception serializing object to json: %s", e, object);
         }
         return result;
     }
@@ -385,10 +368,10 @@ public final class View {
     @SuppressWarnings("unchecked")
     @InterfaceAudience.Private
     public void updateIndex() throws CouchbaseLiteException {
-        Log.v(Database.TAG, "Re-indexing view " + name + " ...");
+        Log.v(Log.TAG_VIEW, "Re-indexing view: %s", name);
         assert (mapBlock != null);
 
-        if (getViewId() < 0) {
+        if (getViewId() <= 0) {
             String msg = String.format("getViewId() < 0");
             throw new CouchbaseLiteException(msg, new Status(Status.NOT_FOUND));
         }
@@ -403,10 +386,9 @@ public final class View {
             long dbMaxSequence = database.getLastSequenceNumber();
             if(lastSequence == dbMaxSequence) {
                 // nothing to do (eg,  kCBLStatusNotModified)
-                String msg = String.format("lastSequence (%d) == dbMaxSequence (%d), nothing to do",
+                Log.v(Log.TAG_VIEW, "lastSequence (%s) == dbMaxSequence (%s), nothing to do",
                         lastSequence, dbMaxSequence);
-                Log.d(Database.TAG, msg);
-                result.setCode(Status.OK);
+                result.setCode(Status.NOT_MODIFIED);
                 return;
             }
 
@@ -456,8 +438,8 @@ public final class View {
                         } else{
                             valueJson = Manager.getObjectMapper().writeValueAsString(value);
                         }
-                        Log.v(Database.TAG, "    emit(" + keyJson + ", "
-                                + valueJson + ")");
+                        //Log.v(Log.TAG_VIEW, "    emit(" + keyJson + ", "
+                        //        + valueJson + ")");
 
                         ContentValues insertValues = new ContentValues();
                         insertValues.put("view_id", getViewId());
@@ -466,7 +448,7 @@ public final class View {
                         insertValues.put("value", valueJson);
                         database.getDatabase().insert("maps", null, insertValues);
                     } catch (Exception e) {
-                        Log.e(Database.TAG, "Error emitting", e);
+                        Log.e(Log.TAG_VIEW, "Error emitting", e);
                         // find a better way to propagate this back
                     }
                 }
@@ -477,15 +459,15 @@ public final class View {
             String[] selectArgs = { Long.toString(lastSequence) };
 
             cursor = database.getDatabase().rawQuery(
-                    "SELECT revs.doc_id, sequence, docid, revid, json FROM revs, docs "
+                    "SELECT revs.doc_id, sequence, docid, revid, json, no_attachments FROM revs, docs "
                             + "WHERE sequence>? AND current!=0 AND deleted=0 "
                             + "AND revs.doc_id = docs.doc_id "
                             + "ORDER BY revs.doc_id, revid DESC", selectArgs);
 
-            cursor.moveToNext();
 
             long lastDocID = 0;
-            while (!cursor.isAfterLast()) {
+            boolean keepGoing = cursor.moveToNext();
+            while (keepGoing) {
                 long docID = cursor.getLong(0);
                 if (docID != lastDocID) {
                     // Only look at the first-iterated revision of any document,
@@ -498,33 +480,75 @@ public final class View {
                     sequence = cursor.getLong(1);
                     String docId = cursor.getString(2);
                     if(docId.startsWith("_design/")) {  // design docs don't get indexed!
-                        cursor.moveToNext();
+                        keepGoing = cursor.moveToNext();
                         continue;
                     }
                     String revId = cursor.getString(3);
                     byte[] json = cursor.getBlob(4);
+
+                    boolean noAttachments = cursor.getInt(5) > 0;
+
+                    while ((keepGoing = cursor.moveToNext()) &&  cursor.getLong(0) == docID) {
+                        // Skip rows with the same doc_id -- these are losing conflicts.
+                    }
+
+                    if (lastSequence > 0) {
+                        // Find conflicts with documents from previous indexings.
+                        String[] selectArgs2 = { Long.toString(docID), Long.toString(lastSequence) };
+
+                        Cursor cursor2 = database.getDatabase().rawQuery(
+                                "SELECT revid, sequence FROM revs "
+                                        + "WHERE doc_id=? AND sequence<=? AND current!=0 AND deleted=0 "
+                                        + "ORDER BY revID DESC "
+                                        + "LIMIT 1", selectArgs2);
+
+                        if (cursor2.moveToNext()) {
+                            String oldRevId = cursor2.getString(0);
+                            // This is the revision that used to be the 'winner'.
+                            // Remove its emitted rows:
+                            long oldSequence = cursor2.getLong(1);
+                            String[] args = {
+                                    Integer.toString(getViewId()),
+                                    Long.toString(oldSequence)
+                            };
+                            database.getDatabase().execSQL(
+                                    "DELETE FROM maps WHERE view_id=? AND sequence=?", args);
+                            if (RevisionInternal.CBLCompareRevIDs(oldRevId, revId) > 0) {
+                                // It still 'wins' the conflict, so it's the one that
+                                // should be mapped [again], not the current revision!
+                                revId = oldRevId;
+                                sequence = oldSequence;
+
+                                String[] selectArgs3 = { Long.toString(sequence) };
+                                json = Utils.byteArrayResultForQuery(database.getDatabase(), "SELECT json FROM revs WHERE sequence=?", selectArgs3);
+
+                            }
+                        }
+
+
+                    }
+
+                    // Get the document properties, to pass to the map function:
+                    EnumSet<TDContentOptions> contentOptions = EnumSet.noneOf(Database.TDContentOptions.class);
+                    if (noAttachments)
+                        contentOptions.add(TDContentOptions.TDNoAttachments);
                     Map<String, Object> properties = database.documentPropertiesFromJSON(
                             json,
                             docId,
                             revId,
                             false,
                             sequence,
-                            EnumSet.noneOf(Database.TDContentOptions.class)
+                            contentOptions
                     );
-
                     if (properties != null) {
                         // Call the user-defined map() to emit new key/value
                         // pairs from this revision:
-                        Log.v(Database.TAG,
-                                "  call map for sequence="
-                                        + Long.toString(sequence));
                         emitBlock.setSequence(sequence);
                         mapBlock.map(properties, emitBlock);
                     }
 
                 }
 
-                cursor.moveToNext();
             }
 
             // Finally, record the last revision sequence number that was
@@ -536,9 +560,9 @@ public final class View {
                     whereArgs);
 
             // FIXME actually count number added :)
-            Log.v(Database.TAG, "...Finished re-indexing view " + name
-                    + " up to sequence " + Long.toString(dbMaxSequence)
-                    + " (deleted " + deleted + " added " + "?" + ")");
+            Log.v(Log.TAG_VIEW, "Finished re-indexing view: %s "
+                    + " up to sequence %s"
+                    + " (deleted %s added ?)", name, dbMaxSequence, deleted);
             result.setCode(Status.OK);
 
         } catch (SQLException e) {
@@ -548,8 +572,7 @@ public final class View {
                 cursor.close();
             }
             if (!result.isSuccessful()) {
-                Log.w(Database.TAG, "Failed to rebuild view " + name + ": "
-                        + result.getCode());
+                Log.w(Log.TAG_VIEW, "Failed to rebuild view %s.  Result code: %d", name, result.getCode());
             }
             if(database != null) {
                 database.endTransaction(result.isSuccessful());
@@ -597,50 +620,69 @@ public final class View {
             sql += ")";
         }
 
-        Object minKey = options.getStartKey();
-        Object maxKey = options.getEndKey();
+        String startKey = toJSONString(options.getStartKey());
+        String endKey = toJSONString(options.getEndKey());
+        String minKey = startKey;
+        String maxKey = endKey;
+        String minKeyDocId = options.getStartKeyDocId();
+        String maxKeyDocId = options.getEndKeyDocId();
+
         boolean inclusiveMin = true;
         boolean inclusiveMax = options.isInclusiveEnd();
         if (options.isDescending()) {
+            String min = minKey;
             minKey = maxKey;
-            maxKey = options.getStartKey();
+            maxKey = min;
             inclusiveMin = inclusiveMax;
             inclusiveMax = true;
+            minKeyDocId = options.getEndKeyDocId();
+            maxKeyDocId = options.getStartKeyDocId();
         }
 
         if (minKey != null) {
-            assert (minKey instanceof String);
             if (inclusiveMin) {
                 sql += " AND key >= ?";
             } else {
                 sql += " AND key > ?";
             }
             sql += collationStr;
-            argsList.add(toJSONString(minKey));
+            argsList.add(minKey);
+            if (minKeyDocId != null && inclusiveMin) {
+                //OPT: This calls the JSON collator a 2nd time unnecessarily.
+                sql += String.format(" AND (key > ? %s OR docid >= ?)", collationStr);
+                argsList.add(minKey);
+                argsList.add(minKeyDocId);
+            }
         }
 
         if (maxKey != null) {
-            assert (maxKey instanceof String);
             if (inclusiveMax) {
                 sql += " AND key <= ?";
             } else {
                 sql += " AND key < ?";
             }
             sql += collationStr;
-            argsList.add(toJSONString(maxKey));
+            argsList.add(maxKey);
+            if (maxKeyDocId != null && inclusiveMax) {
+                sql += String.format(" AND (key < ? %s OR docid <= ?)", collationStr);
+                argsList.add(maxKey);
+                argsList.add(maxKeyDocId);
+            }
         }
 
         sql = sql
                 + " AND revs.sequence = maps.sequence AND docs.doc_id = revs.doc_id ORDER BY key";
         sql += collationStr;
+
         if (options.isDescending()) {
             sql = sql + " DESC";
         }
+
         sql = sql + " LIMIT ? OFFSET ?";
         argsList.add(Integer.toString(options.getLimit()));
         argsList.add(Integer.toString(options.getSkip()));
 
-        Log.v(Database.TAG, "Query " + name + ": " + sql);
+        Log.v(Log.TAG_VIEW, "Query %s: %s | args: %s", name, sql, argsList);
 
         Cursor cursor = database.getDatabase().rawQuery(sql,
                 argsList.toArray(new String[argsList.size()]));
@@ -717,7 +759,7 @@ public final class View {
                 cursor.moveToNext();
             }
         } catch (SQLException e) {
-            Log.e(Database.TAG, "Error dumping view", e);
+            Log.e(Log.TAG_VIEW, "Error dumping view", e);
             return null;
         } finally {
             if (cursor != null) {
@@ -745,11 +787,12 @@ public final class View {
 
         cursor.moveToNext();
         while (!cursor.isAfterLast()) {
-            Object keyData = fromJSON(cursor.getBlob(0));
-            Object value = fromJSON(cursor.getBlob(1));
-            assert(keyData != null);
+            JsonDocument keyDoc = new JsonDocument(cursor.getBlob(0));
+            JsonDocument valueDoc = new JsonDocument(cursor.getBlob(1));
+            assert(keyDoc != null);
 
-            if(group && !groupTogether(keyData, lastKey, groupLevel)) {
+            Object keyObject = keyDoc.jsonObject();
+            if(group && !groupTogether(keyObject, lastKey, groupLevel)) {
                 if (lastKey != null) {
                     // This pair starts a new group, so reduce & record the last one:
                     Object reduced = (reduceBlock != null) ? reduceBlock.reduce(keysToReduce, valuesToReduce, false) : null;
@@ -761,10 +804,10 @@ public final class View {
                     valuesToReduce.clear();
 
                 }
-                lastKey = keyData;
+                lastKey = keyObject;
             }
-            keysToReduce.add(keyData);
-            valuesToReduce.add(value);
+            keysToReduce.add(keyObject);
+            valuesToReduce.add(valueDoc.jsonObject());
 
             cursor.moveToNext();
 
@@ -807,8 +850,7 @@ public final class View {
             boolean reduce = options.isReduce() || group;
 
             if (reduce && (reduceBlock == null) && !group) {
-                String msg = "Cannot use reduce option in view " + name + " which has no reduce block defined";
-                Log.w(Database.TAG, msg);
+                Log.w(Log.TAG_VIEW, "Cannot use reduce option in view %s which has no reduce block defined", name);
                 throw new CouchbaseLiteException(new Status(Status.BAD_REQUEST));
             }
 
@@ -819,15 +861,16 @@ public final class View {
                 // regular query
                 cursor.moveToNext();
                 while (!cursor.isAfterLast()) {
-                    Object keyData = fromJSON(cursor.getBlob(0));  // TODO: delay parsing this for increased efficiency
-                    Object value = fromJSON(cursor.getBlob(1));    // TODO: ditto
+                    JsonDocument keyDoc = new JsonDocument(cursor.getBlob(0));
+                    JsonDocument valueDoc = new JsonDocument(cursor.getBlob(1));
                     String docId = cursor.getString(2);
                     int sequence =  Integer.valueOf(cursor.getString(3));
                     Map<String, Object> docContents = null;
                     if (options.isIncludeDocs()) {
+                        Object valueObject = valueDoc.jsonObject();
                         // http://wiki.apache.org/couchdb/Introduction_to_CouchDB_views#Linked_documents
-                        if (value instanceof Map && ((Map) value).containsKey("_id")) {
-                            String linkedDocId = (String) ((Map) value).get("_id");
+                        if (valueObject instanceof Map && ((Map) valueObject).containsKey("_id")) {
+                            String linkedDocId = (String) ((Map) valueObject).get("_id");
                             RevisionInternal linkedDoc = database.getDocumentWithIDAndRev(
                                     linkedDocId,
                                     null,
@@ -845,7 +888,7 @@ public final class View {
                             );
                         }
                     }
-                    QueryRow row = new QueryRow(docId, sequence, keyData, value, docContents);
+                    QueryRow row = new QueryRow(docId, sequence, keyDoc.jsonObject(), valueDoc.jsonObject(), docContents);
                     row.setDatabase(database);
                     rows.add(row);
                     cursor.moveToNext();
@@ -855,7 +898,7 @@ public final class View {
 
         } catch (SQLException e) {
             String errMsg = String.format("Error querying view: %s", this);
-            Log.e(Database.TAG, errMsg, e);
+            Log.e(Log.TAG_VIEW, errMsg, e);
             throw new CouchbaseLiteException(errMsg, e, new Status(Status.DB_ERROR));
         } finally {
             if (cursor != null) {
@@ -880,7 +923,7 @@ public final class View {
                 Number number = (Number)object;
                 total += number.doubleValue();
             } else {
-                Log.w(Database.TAG, "Warning non-numeric value found in totalValues: " + object);
+                Log.w(Log.TAG_VIEW, "Warning non-numeric value found in totalValues: %s", object);
             }
         }
         return total;

@@ -1,33 +1,47 @@
-/**
- * Couchbase Lite for .NET
- *
- * Original iOS version by Jens Alfke
- * Android Port by Marty Schoch, Traun Leyden
- * C# Port by Zack Gramana
- *
- * Copyright (c) 2012, 2013, 2014 Couchbase, Inc. All rights reserved.
- * Portions (c) 2013, 2014 Xamarin, Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
- * either express or implied. See the License for the specific language governing permissions
- * and limitations under the License.
- */
-
-using System;
+// 
+// Copyright (c) 2014 .NET Foundation
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+// 
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+//
+// Copyright (c) 2014 Couchbase, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+//using System;
 using System.Collections.Generic;
-using Couchbase.Lite;
 using Couchbase.Lite.Auth;
 using Couchbase.Lite.Util;
 using Sharpen;
 
 namespace Couchbase.Lite.Auth
 {
+	/// <summary>Authenticator impl that knows how to do facebook auth</summary>
+	/// <exclude></exclude>
 	public class FacebookAuthorizer : Authorizer
 	{
 		public const string LoginParameterAccessToken = "access_token";
@@ -68,7 +82,7 @@ namespace Couchbase.Lite.Auth
 			}
 			catch (Exception e)
 			{
-				Log.E(Database.Tag, "Error looking login parameters for site", e);
+				Log.E(Log.TagSync, "Error looking login parameters for site", e);
 			}
 			return null;
 		}
@@ -90,7 +104,7 @@ namespace Couchbase.Lite.Auth
 				{
 					accessTokens = new Dictionary<IList<string>, string>();
 				}
-				Log.D(Database.Tag, "FacebookAuthorizer registering key: " + key);
+				Log.V(Log.TagSync, "FacebookAuthorizer registering key: %s", key);
 				accessTokens.Put(key, accessToken);
 				return email;
 			}
@@ -103,13 +117,13 @@ namespace Couchbase.Lite.Auth
 				IList<string> key = new AList<string>();
 				key.AddItem(email);
 				key.AddItem(site.ToExternalForm().ToLower());
-				Log.D(Database.Tag, "FacebookAuthorizer looking up key: " + key + " from list of access tokens"
-					);
+				Log.V(Log.TagSync, "FacebookAuthorizer looking up key: %s from list of access tokens"
+					, key);
 				return accessTokens.Get(key);
 			}
 			catch (Exception e)
 			{
-				Log.E(Database.Tag, "Error looking up access token", e);
+				Log.E(Log.TagSync, "Error looking up access token", e);
 			}
 			return null;
 		}

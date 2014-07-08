@@ -7,15 +7,22 @@ import com.couchbase.lite.internal.InterfaceAudience;
 import com.couchbase.lite.replicator.Puller;
 import com.couchbase.lite.replicator.Pusher;
 import com.couchbase.lite.replicator.Replication;
+import com.couchbase.lite.support.CouchbaseLiteHttpClientFactory;
 import com.couchbase.lite.support.FileDirUtils;
 import com.couchbase.lite.support.HttpClientFactory;
+import com.couchbase.lite.support.Version;
 import com.couchbase.lite.util.Log;
+import com.couchbase.lite.util.StreamUtils;
 
 import org.codehaus.jackson.map.ObjectMapper;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
@@ -35,8 +42,6 @@ import java.util.regex.Pattern;
  * Top-level CouchbaseLite object; manages a collection of databases as a CouchDB server does.
  */
 public final class Manager {
-
-    public static final String VERSION =  "1.0.0-beta2";
 
     /**
      * @exclude
@@ -63,6 +68,8 @@ public final class Manager {
      */
     public static final String LEGAL_CHARACTERS = "[^a-z]{1,}[^a-z0-9_$()/+-]*$";
 
+    public static final String VERSION = Version.VERSION;
+
     private static final ObjectMapper mapper = new ObjectMapper();
     private ManagerOptions options;
     private File directoryFile;
@@ -70,6 +77,7 @@ public final class Manager {
     private List<Replication> replications;
     private ScheduledExecutorService workExecutor;
     private HttpClientFactory defaultHttpClientFactory;
+    private Context context;
 
     /**
      * @exclude
@@ -92,16 +100,28 @@ public final class Manager {
     }
 
     /**
+     * Enable logging for a particular tag / loglevel combo
+     * @param tag Used to identify the source of a log message.  It usually identifies
+     *        the class or activity where the log call occurs.
+     * @param logLevel The loglevel to enable.  Anything matching this loglevel
+     *                 or having a more urgent loglevel will be emitted.  Eg, Log.VERBOSE.
+     */
+    public static void enableLogging(String tag, int logLevel) {
+        Log.enableLogging(tag, logLevel);
+    }
+
+    /**
      * Constructor
      *
      * @throws java.lang.SecurityException - Runtime exception that can be thrown by File.mkdirs()
      */
     @InterfaceAudience.Public
-    public Manager(File directoryFile, ManagerOptions options) throws IOException {
+    public Manager(Context context, ManagerOptions options) throws IOException {
 
-        Log.v(Database.TAG, "Starting Manager version: " + VERSION);
+        Log.i(Database.TAG, "Starting Manager version: %s", Manager.VERSION);
 
-        this.directoryFile = directoryFile;
+        this.context = context;
+        this.directoryFile = context.getFilesDir();
         this.options = (options != null) ? options : DEFAULT_OPTIONS;
         this.databases = new HashMap<String, Database>();
         this.replications = new ArrayList<Replication>();
@@ -146,8 +166,8 @@ public final class Manager {
      * The root directory of this manager (as specified at initialization time.)
      */
     @InterfaceAudience.Public
-    public String getDirectory() {
-        return directoryFile.getAbsolutePath();
+    public File getDirectory() {
+        return directoryFile;
     }
 
     /**
@@ -191,6 +211,7 @@ public final class Manager {
             database.close();
         }
         databases.clear();
+        context.getNetworkReachabilityManager().stopListening();
         Log.i(Database.TAG, "Closed " + this);
     }
 
@@ -204,7 +225,10 @@ public final class Manager {
         boolean mustExist = false;
         Database db = getDatabaseWithoutOpening(name, mustExist);
         if (db != null) {
-            db.open();
+            boolean opened = db.open();
+            if (!opened) {
+                return null;
+            }
         }
         return db;
     }
@@ -232,27 +256,43 @@ public final class Manager {
      * canned database would have been copied into your app bundle at build time.
      *
      * @param databaseName  The name of the target Database to replace or create.
-     * @param databaseFile  Path of the source Database file.
-     * @param attachmentsDirectory  Path of the associated Attachments directory, or null if there are no attachments.
+     * @param databaseStream  InputStream on the source Database file.
+     * @param attachmentStreams  Map of the associated source Attachments, or null if there are no attachments.
+     *                           The Map key is the name of the attachment, the map value is an InputStream for
+     *                           the attachment contents. If you wish to control the order that the attachments
+     *                           will be processed, use a LinkedHashMap, SortedMap or similar and the iteration order
+     *                           will be honoured.
      **/
     @InterfaceAudience.Public
-    public void replaceDatabase(String databaseName, File databaseFile, File attachmentsDirectory) throws CouchbaseLiteException {
+    public void replaceDatabase(String databaseName, InputStream databaseStream, Map<String,InputStream> attachmentStreams) throws CouchbaseLiteException {
+        replaceDatabase(databaseName, databaseStream, attachmentStreams == null ? null : attachmentStreams.entrySet().iterator());
+    }
+
+    private void replaceDatabase(String databaseName, InputStream databaseStream, Iterator<Map.Entry<String,InputStream>> attachmentStreams) throws CouchbaseLiteException {
         try {
             Database database = getDatabase(databaseName);
             String dstAttachmentsPath = database.getAttachmentStorePath();
-            File destFile = new File(database.getPath());
-            FileDirUtils.copyFile(databaseFile, destFile);
+            OutputStream destStream = new FileOutputStream(new File(database.getPath()));
+            StreamUtils.copyStream(databaseStream, destStream);
             File attachmentsFile = new File(dstAttachmentsPath);
             FileDirUtils.deleteRecursive(attachmentsFile);
             attachmentsFile.mkdirs();
-            if(attachmentsDirectory != null) {
-                FileDirUtils.copyFolder(attachmentsDirectory, attachmentsFile);
+            if(attachmentStreams != null) {
+                StreamUtils.copyStreamsToFolder(attachmentStreams,attachmentsFile);
             }
+
+            database.open();
             database.replaceUUIDs();
-        } catch (IOException e) {
+        }
+        catch (FileNotFoundException e) {
             Log.e(Database.TAG, "", e);
             throw new CouchbaseLiteException(Status.INTERNAL_SERVER_ERROR);
         }
+        catch (IOException e) {
+            Log.e(Database.TAG, "", e);
+            throw new CouchbaseLiteException(Status.INTERNAL_SERVER_ERROR);
+        }
+
     }
 
     /**
@@ -299,8 +339,7 @@ public final class Manager {
             String newFilename = filenameWithNewExtension(oldFilename, DATABASE_SUFFIX_OLD, DATABASE_SUFFIX);
             File newFile = new File(directory, newFilename);
             if (newFile.exists()) {
-                String msg = String.format("Cannot rename %s to %s, %s already exists", oldFilename, newFilename, newFilename);
-                Log.w(Database.TAG, msg);
+                Log.w(Database.TAG, "Cannot rename %s to %s, %s already exists", oldFilename, newFilename, newFilename);
                 continue;
             }
             boolean ok = file.renameTo(newFile);
@@ -440,8 +479,7 @@ public final class Manager {
             }
             db = new Database(path, this);
             if (mustExist && !db.exists()) {
-                String msg = String.format("mustExist is true and db (%s) does not exist", name);
-                Log.w(Database.TAG, msg);
+                Log.w(Database.TAG, "mustExist is true and db (%s) does not exist", name);
                 return null;
             }
             db.setName(name);
@@ -554,8 +592,8 @@ public final class Manager {
         } catch (MalformedURLException e) {
             throw new CouchbaseLiteException("malformed remote url: " + remoteStr, new Status(Status.BAD_REQUEST));
         }
-        if(remote == null || !remote.getProtocol().startsWith("http")) {
-            throw new CouchbaseLiteException("remote URL is null or non-http: " + remoteStr, new Status(Status.BAD_REQUEST));
+        if(remote == null) {
+            throw new CouchbaseLiteException("remote URL is null: " + remoteStr, new Status(Status.BAD_REQUEST));
         }
 
 
@@ -566,7 +604,7 @@ public final class Manager {
             }
 
             if (authorizer != null) {
-                repl.setAuthorizer(authorizer);
+                repl.setAuthenticator(authorizer);
             }
 
             Map<String, Object> headers = (Map) properties.get("headers");
@@ -605,6 +643,11 @@ public final class Manager {
     @InterfaceAudience.Private
     public ScheduledExecutorService getWorkExecutor() {
         return workExecutor;
+    }
+
+    @InterfaceAudience.Private
+    public Context getContext() {
+        return context;
     }
 
 

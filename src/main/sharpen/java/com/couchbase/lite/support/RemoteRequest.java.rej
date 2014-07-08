@@ -1,0 +1,17 @@
+***************
+*** 114,120 ****
+  
+              // add in cookies to global store
+              DefaultHttpClient defaultHttpClient = (DefaultHttpClient)httpClient;
+-             CouchbaseLiteHttpClientFactory.INSTANCE.addCookies(defaultHttpClient.getCookieStore().getCookies());
+  
+              StatusLine status = response.getStatusLine();
+              if (status.getStatusCode() >= 300) {
+--- 114,120 ----
+  
+              // add in cookies to global store
+              DefaultHttpClient defaultHttpClient = (DefaultHttpClient)httpClient;
++             new CouchbaseLiteHttpClientFactory().addCookies(defaultHttpClient.getCookieStore().getCookies());
+  
+              StatusLine status = response.getStatusLine();
+              if (status.getStatusCode() >= 300) {

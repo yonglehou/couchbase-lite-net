@@ -1,25 +1,38 @@
-/**
- * Couchbase Lite for .NET
- *
- * Original iOS version by Jens Alfke
- * Android Port by Marty Schoch, Traun Leyden
- * C# Port by Zack Gramana
- *
- * Copyright (c) 2012, 2013, 2014 Couchbase, Inc. All rights reserved.
- * Portions (c) 2013, 2014 Xamarin, Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
- * either express or implied. See the License for the specific language governing permissions
- * and limitations under the License.
- */
-
-using System;
+// 
+// Copyright (c) 2014 .NET Foundation
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+// 
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+//
+// Copyright (c) 2014 Couchbase, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+//using System;
 using System.Collections.Generic;
 using Couchbase.Lite;
 using Couchbase.Lite.Auth;
@@ -62,6 +75,50 @@ namespace Couchbase.Lite
 				Sharpen.Runtime.PrintStackTrace(e);
 				Assert.Fail(e.Message);
 			}
+		}
+
+		public virtual void TestAuthenticatorFactory()
+		{
+			Authenticator basicAuth = AuthenticatorFactory.CreateBasicAuthenticator("username"
+				, "password");
+			NUnit.Framework.Assert.IsNotNull(basicAuth);
+			NUnit.Framework.Assert.IsTrue(basicAuth is BasicAuthenticator);
+			Authenticator facebookAuth = AuthenticatorFactory.CreateFacebookAuthenticator("DUMMY_TOKEN"
+				);
+			NUnit.Framework.Assert.IsNotNull(facebookAuth);
+			NUnit.Framework.Assert.IsTrue(facebookAuth is TokenAuthenticator);
+			Authenticator personalAuth = AuthenticatorFactory.CreatePersonaAuthenticator("DUMMY_ASSERTION"
+				, null);
+			NUnit.Framework.Assert.IsNotNull(personalAuth);
+			NUnit.Framework.Assert.IsTrue(personalAuth is TokenAuthenticator);
+		}
+
+		public virtual void TestTokenAuthenticator()
+		{
+			string loginPath = "_facebook";
+			IDictionary<string, string> @params = new Dictionary<string, string>();
+			@params.Put("access_token", "facebookaccesstoken");
+			TokenAuthenticator tokenAuth = new TokenAuthenticator(loginPath, @params);
+			IDictionary<string, string> tokenAuthParams = tokenAuth.LoginParametersForSite(null
+				);
+			NUnit.Framework.Assert.IsNotNull(tokenAuthParams);
+			NUnit.Framework.Assert.AreEqual(tokenAuthParams.Count, @params.Count);
+			NUnit.Framework.Assert.AreEqual(tokenAuthParams.Get("access_token"), @params.Get(
+				"access_token"));
+			NUnit.Framework.Assert.AreEqual(tokenAuth.LoginPathForSite(null), "/_facebook");
+			NUnit.Framework.Assert.IsTrue(tokenAuth.UsesCookieBasedLogin());
+			NUnit.Framework.Assert.IsNull(tokenAuth.AuthUserInfo());
+		}
+
+		public virtual void TestBasicAuthenticator()
+		{
+			string username = "username";
+			string password = "password";
+			BasicAuthenticator basicAuth = new BasicAuthenticator(username, password);
+			NUnit.Framework.Assert.IsNull(basicAuth.LoginParametersForSite(null));
+			NUnit.Framework.Assert.IsTrue(basicAuth.UsesCookieBasedLogin());
+			NUnit.Framework.Assert.AreEqual(basicAuth.AuthUserInfo(), username + ":" + password
+				);
 		}
 	}
 }

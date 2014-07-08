@@ -1,25 +1,38 @@
-/**
- * Couchbase Lite for .NET
- *
- * Original iOS version by Jens Alfke
- * Android Port by Marty Schoch, Traun Leyden
- * C# Port by Zack Gramana
- *
- * Copyright (c) 2012, 2013, 2014 Couchbase, Inc. All rights reserved.
- * Portions (c) 2013, 2014 Xamarin, Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
- * either express or implied. See the License for the specific language governing permissions
- * and limitations under the License.
- */
-
-using System;
+// 
+// Copyright (c) 2014 .NET Foundation
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+// 
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+//
+// Copyright (c) 2014 Couchbase, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+// except in compliance with the License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the
+// License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+// either express or implied. See the License for the specific language governing permissions
+// and limitations under the License.
+//using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -39,8 +52,6 @@ namespace Couchbase.Lite
 	/// 	</remarks>
 	public sealed class Manager
 	{
-		public const string Version = "1.0.0-beta2";
-
 		/// <exclude></exclude>
 		public const string HttpErrorDomain = "CBLHTTP";
 
@@ -56,6 +67,8 @@ namespace Couchbase.Lite
 		/// <exclude></exclude>
 		public const string LegalCharacters = "[^a-z]{1,}[^a-z0-9_$()/+-]*$";
 
+		public static readonly string Version = Version.Version;
+
 		private static readonly ObjectWriter mapper = new ObjectWriter();
 
 		private ManagerOptions options;
@@ -69,6 +82,8 @@ namespace Couchbase.Lite
 		private ScheduledExecutorService workExecutor;
 
 		private HttpClientFactory defaultHttpClientFactory;
+
+		private Context context;
 
 		/// <exclude></exclude>
 		[InterfaceAudience.Private]
@@ -88,15 +103,31 @@ namespace Couchbase.Lite
 			throw new NotSupportedException(detailMessage);
 		}
 
+		/// <summary>Enable logging for a particular tag / loglevel combo</summary>
+		/// <param name="tag">
+		/// Used to identify the source of a log message.  It usually identifies
+		/// the class or activity where the log call occurs.
+		/// </param>
+		/// <param name="logLevel">
+		/// The loglevel to enable.  Anything matching this loglevel
+		/// or having a more urgent loglevel will be emitted.  Eg, Log.VERBOSE.
+		/// </param>
+		public static void EnableLogging(string tag, int logLevel)
+		{
+			Log.EnableLogging(tag, logLevel);
+		}
+
 		/// <summary>Constructor</summary>
 		/// <exception cref="System.Security.SecurityException">- Runtime exception that can be thrown by File.mkdirs()
 		/// 	</exception>
 		/// <exception cref="System.IO.IOException"></exception>
 		[InterfaceAudience.Public]
-		public Manager(FilePath directoryFile, ManagerOptions options)
+		public Manager(Context context, ManagerOptions options)
 		{
-			Log.V(Database.Tag, "Starting Manager version: " + Version);
-			this.directoryFile = directoryFile;
+			Log.I(Database.Tag, "Starting Manager version: %s", Couchbase.Lite.Manager.Version
+				);
+			this.context = context;
+			this.directoryFile = context.GetFilesDir();
 			this.options = (options != null) ? options : DefaultOptions;
 			this.databases = new Dictionary<string, Database>();
 			this.replications = new AList<Replication>();
@@ -140,9 +171,9 @@ namespace Couchbase.Lite
 		/// <summary>The root directory of this manager (as specified at initialization time.)
 		/// 	</summary>
 		[InterfaceAudience.Public]
-		public string GetDirectory()
+		public FilePath GetDirectory()
 		{
-			return directoryFile.GetAbsolutePath();
+			return directoryFile;
 		}
 
 		/// <summary>An array of the names of all existing databases.</summary>
@@ -150,7 +181,7 @@ namespace Couchbase.Lite
 		[InterfaceAudience.Public]
 		public IList<string> GetAllDatabaseNames()
 		{
-			string[] databaseFiles = directoryFile.List(new _FilenameFilter_158());
+			string[] databaseFiles = directoryFile.List(new _FilenameFilter_178());
 			IList<string> result = new AList<string>();
 			foreach (string databaseFile in databaseFiles)
 			{
@@ -163,9 +194,9 @@ namespace Couchbase.Lite
 			return Sharpen.Collections.UnmodifiableList(result);
 		}
 
-		private sealed class _FilenameFilter_158 : FilenameFilter
+		private sealed class _FilenameFilter_178 : FilenameFilter
 		{
-			public _FilenameFilter_158()
+			public _FilenameFilter_178()
 			{
 			}
 
@@ -200,6 +231,7 @@ namespace Couchbase.Lite
 				database.Close();
 			}
 			databases.Clear();
+			context.GetNetworkReachabilityManager().StopListening();
 			Log.I(Database.Tag, "Closed " + this);
 		}
 
@@ -217,7 +249,11 @@ namespace Couchbase.Lite
 			Database db = GetDatabaseWithoutOpening(name, mustExist);
 			if (db != null)
 			{
-				db.Open();
+				bool opened = db.Open();
+				if (!opened)
+				{
+					return null;
+				}
 			}
 			return db;
 		}
@@ -248,28 +284,47 @@ namespace Couchbase.Lite
 		/// canned database would have been copied into your app bundle at build time.
 		/// </remarks>
 		/// <param name="databaseName">The name of the target Database to replace or create.</param>
-		/// <param name="databaseFile">Path of the source Database file.</param>
-		/// <param name="attachmentsDirectory">Path of the associated Attachments directory, or null if there are no attachments.
-		/// 	</param>
+		/// <param name="databaseStream">InputStream on the source Database file.</param>
+		/// <param name="attachmentStreams">
+		/// Map of the associated source Attachments, or null if there are no attachments.
+		/// The Map key is the name of the attachment, the map value is an InputStream for
+		/// the attachment contents. If you wish to control the order that the attachments
+		/// will be processed, use a LinkedHashMap, SortedMap or similar and the iteration order
+		/// will be honoured.
+		/// </param>
 		/// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
 		[InterfaceAudience.Public]
-		public void ReplaceDatabase(string databaseName, FilePath databaseFile, FilePath 
-			attachmentsDirectory)
+		public void ReplaceDatabase(string databaseName, InputStream databaseStream, IDictionary
+			<string, InputStream> attachmentStreams)
+		{
+			ReplaceDatabase(databaseName, databaseStream, attachmentStreams == null ? null : 
+				attachmentStreams.EntrySet().GetEnumerator());
+		}
+
+		/// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
+		private void ReplaceDatabase(string databaseName, InputStream databaseStream, IEnumerator
+			<KeyValuePair<string, InputStream>> attachmentStreams)
 		{
 			try
 			{
 				Database database = GetDatabase(databaseName);
 				string dstAttachmentsPath = database.GetAttachmentStorePath();
-				FilePath destFile = new FilePath(database.GetPath());
-				FileDirUtils.CopyFile(databaseFile, destFile);
+				OutputStream destStream = new FileOutputStream(new FilePath(database.GetPath()));
+				StreamUtils.CopyStream(databaseStream, destStream);
 				FilePath attachmentsFile = new FilePath(dstAttachmentsPath);
 				FileDirUtils.DeleteRecursive(attachmentsFile);
 				attachmentsFile.Mkdirs();
-				if (attachmentsDirectory != null)
+				if (attachmentStreams != null)
 				{
-					FileDirUtils.CopyFolder(attachmentsDirectory, attachmentsFile);
+					StreamUtils.CopyStreamsToFolder(attachmentStreams, attachmentsFile);
 				}
+				database.Open();
 				database.ReplaceUUIDs();
+			}
+			catch (FileNotFoundException e)
+			{
+				Log.E(Database.Tag, string.Empty, e);
+				throw new CouchbaseLiteException(Status.InternalServerError);
 			}
 			catch (IOException e)
 			{
@@ -307,7 +362,7 @@ namespace Couchbase.Lite
 		[InterfaceAudience.Private]
 		private void UpgradeOldDatabaseFiles(FilePath directory)
 		{
-			FilePath[] files = directory.ListFiles(new _FilenameFilter_290());
+			FilePath[] files = directory.ListFiles(new _FilenameFilter_330());
 			foreach (FilePath file in files)
 			{
 				string oldFilename = file.GetName();
@@ -316,9 +371,8 @@ namespace Couchbase.Lite
 				FilePath newFile = new FilePath(directory, newFilename);
 				if (newFile.Exists())
 				{
-					string msg = string.Format("Cannot rename %s to %s, %s already exists", oldFilename
-						, newFilename, newFilename);
-					Log.W(Database.Tag, msg);
+					Log.W(Database.Tag, "Cannot rename %s to %s, %s already exists", oldFilename, newFilename
+						, newFilename);
 					continue;
 				}
 				bool ok = file.RenameTo(newFile);
@@ -330,9 +384,9 @@ namespace Couchbase.Lite
 			}
 		}
 
-		private sealed class _FilenameFilter_290 : FilenameFilter
+		private sealed class _FilenameFilter_330 : FilenameFilter
 		{
-			public _FilenameFilter_290()
+			public _FilenameFilter_330()
 			{
 			}
 
@@ -370,12 +424,12 @@ namespace Couchbase.Lite
 		public Future RunAsync(string databaseName, AsyncTask function)
 		{
 			Database database = GetDatabase(databaseName);
-			return RunAsync(new _Runnable_342(function, database));
+			return RunAsync(new _Runnable_381(function, database));
 		}
 
-		private sealed class _Runnable_342 : Runnable
+		private sealed class _Runnable_381 : Runnable
 		{
-			public _Runnable_342(AsyncTask function, Database database)
+			public _Runnable_381(AsyncTask function, Database database)
 			{
 				this.function = function;
 				this.database = database;
@@ -492,8 +546,7 @@ namespace Couchbase.Lite
 				db = new Database(path, this);
 				if (mustExist && !db.Exists())
 				{
-					string msg = string.Format("mustExist is true and db (%s) does not exist", name);
-					Log.W(Database.Tag, msg);
+					Log.W(Database.Tag, "mustExist is true and db (%s) does not exist", name);
 					return null;
 				}
 				db.SetName(name);
@@ -609,10 +662,10 @@ namespace Couchbase.Lite
 				throw new CouchbaseLiteException("malformed remote url: " + remoteStr, new Status
 					(Status.BadRequest));
 			}
-			if (remote == null || !remote.Scheme.StartsWith("http"))
+			if (remote == null)
 			{
-				throw new CouchbaseLiteException("remote URL is null or non-http: " + remoteStr, 
-					new Status(Status.BadRequest));
+				throw new CouchbaseLiteException("remote URL is null: " + remoteStr, new Status(Status
+					.BadRequest));
 			}
 			if (!cancel)
 			{
@@ -625,7 +678,7 @@ namespace Couchbase.Lite
 				}
 				if (authorizer != null)
 				{
-					repl.SetAuthorizer(authorizer);
+					repl.SetAuthenticator(authorizer);
 				}
 				IDictionary<string, object> headers = (IDictionary)properties.Get("headers");
 				if (headers != null && !headers.IsEmpty())
@@ -666,6 +719,12 @@ namespace Couchbase.Lite
 		public ScheduledExecutorService GetWorkExecutor()
 		{
 			return workExecutor;
+		}
+
+		[InterfaceAudience.Private]
+		public Context GetContext()
+		{
+			return context;
 		}
 	}
 }

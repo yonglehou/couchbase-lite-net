@@ -46,12 +46,17 @@ public class MultipartDocumentReader implements MultipartReaderDelegate {
     }
 
     public void setContentType(String contentType) {
-        if (!contentType.startsWith("multipart/")) {
+        if (contentType.startsWith("multipart/")) {
+            multipartReader = new MultipartReader(contentType, this);
+            attachmentsByName = new HashMap<String, BlobStoreWriter>();
+            attachmentsByMd5Digest = new HashMap<String, BlobStoreWriter>();
+        } else if (contentType == null || contentType.startsWith("application/json")
+                    || contentType.startsWith("text/plain")) {
+            // No multipart, so no attachments. Body is pure JSON. (We allow text/plain because CouchDB
+            // sends JSON responses using the wrong content-type.)
+        } else {
             throw new IllegalArgumentException("contentType must start with multipart/");
         }
-        multipartReader = new MultipartReader(contentType, this);
-        attachmentsByName = new HashMap<String, BlobStoreWriter>();
-        attachmentsByMd5Digest = new HashMap<String, BlobStoreWriter>();
     }
 
     public void appendData(byte[] data) {
@@ -147,9 +152,8 @@ public class MultipartDocumentReader implements MultipartReaderDelegate {
 
             }
             else if (attachment.containsKey("data") && length > 1000) {
-                String msg = String.format("Attachment '%s' sent inline (len=%d).  Large attachments " +
+                Log.w(Log.TAG_REMOTE_REQUEST, "Attachment '%s' sent inline (len=%d).  Large attachments " +
                         "should be sent in MIME parts for reduced memory overhead.", attachmentName);
-                Log.w(Database.TAG, msg);
             }
 
         }

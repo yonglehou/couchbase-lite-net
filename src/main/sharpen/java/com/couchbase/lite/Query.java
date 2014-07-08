@@ -1,6 +1,7 @@
 package com.couchbase.lite;
 
 import com.couchbase.lite.internal.InterfaceAudience;
+import com.couchbase.lite.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -397,6 +398,7 @@ public class Query {
                     onComplete.completed(enumerator, null);
 
                 } catch (Throwable t) {
+                    Log.e(Log.TAG_QUERY, "Exception caught in runAsyncInternal", t);
                     onComplete.completed(null, t);
                 }
             }
@@ -430,6 +432,8 @@ public class Query {
         queryOptions.setInclusiveEnd(true);
         queryOptions.setStale(getIndexUpdateMode());
         queryOptions.setAllDocsMode(getAllDocsMode());
+        queryOptions.setStartKeyDocId(getStartKeyDocId());
+        queryOptions.setEndKeyDocId(getEndKeyDocId());
         return queryOptions;
     }
 
