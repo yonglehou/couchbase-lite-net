@@ -41,16 +41,16 @@
 * either express or implied. See the License for the specific language governing permissions
 * and limitations under the License.
 */
-namespace Sharpen
-{
-	using System;
-	using System.IO.Compression;
+//namespace Sharpen
+//{
+//    using System;
+//    using System.IO.Compression;
 
-	internal class GZIPOutputStream : OutputStream
-	{
-		public GZIPOutputStream (OutputStream os)
-		{
-			Wrapped = new GZipStream (os, CompressionMode.Compress);
-		}
-	}
-}
+//    internal class GZIPOutputStream : OutputStream
+//    {
+//        public GZIPOutputStream (OutputStream os)
+//        {
+//            Wrapped = new GZipStream (os, CompressionMode.Compress);
+//        }
+//    }
+//}

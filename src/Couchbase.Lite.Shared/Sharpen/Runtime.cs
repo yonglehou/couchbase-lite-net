@@ -50,7 +50,7 @@ using System.Runtime.CompilerServices;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
+//using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 using System.Linq;
 
 namespace Sharpen
@@ -77,65 +77,67 @@ namespace Sharpen
 			return DateTime.UtcNow.ToMillisecondsSinceEpoch ();
 		}
 
-		internal SystemProcess Exec (string[] cmd, string[] envp, FilePath dir)
-		{
-			try {
-				ProcessStartInfo psi = new ProcessStartInfo ();
-				psi.FileName = cmd[0];
-				psi.Arguments = string.Join (" ", cmd, 1, cmd.Length - 1);
-				if (dir != null) {
-					psi.WorkingDirectory = dir.GetPath ();
-				}
-				psi.UseShellExecute = false;
-				psi.RedirectStandardInput = true;
-				psi.RedirectStandardError = true;
-				psi.RedirectStandardOutput = true;
-				psi.CreateNoWindow = true;
-				if (envp != null) {
-					foreach (string str in envp) {
-						int index = str.IndexOf ('=');
-						psi.EnvironmentVariables[str.Substring (0, index)] = str.Substring (index + 1);
-					}
-				}
-				return SystemProcess.Start (psi);
-			} catch (System.ComponentModel.Win32Exception ex) {
-				throw new IOException (ex.Message);
-			}
-		}
+        //internal SystemProcess Exec (string[] cmd, string[] envp, FilePath dir)
+        //{
+        //    try {
+        //        ProcessStartInfo psi = new ProcessStartInfo ();
+        //        psi.FileName = cmd[0];
+        //        psi.Arguments = string.Join (" ", cmd, 1, cmd.Length - 1);
+        //        if (dir != null) {
+        //            psi.WorkingDirectory = dir.GetPath ();
+        //        }
+        //        psi.UseShellExecute = false;
+        //        psi.RedirectStandardInput = true;
+        //        psi.RedirectStandardError = true;
+        //        psi.RedirectStandardOutput = true;
+        //        psi.CreateNoWindow = true;
+        //        if (envp != null) {
+        //            foreach (string str in envp) {
+        //                int index = str.IndexOf ('=');
+        //                psi.EnvironmentVariables[str.Substring (0, index)] = str.Substring (index + 1);
+        //            }
+        //        }
+        //        return SystemProcess.Start (psi);
+        //    } catch (System.ComponentModel.Win32Exception ex) {
+        //        throw new IOException (ex.Message);
+        //    }
+        //}
 
-		internal static string Getenv (string var)
-		{
-			return Environment.GetEnvironmentVariable (var);
-		}
+        //internal static string Getenv (string var)
+        //{
+        //    return Environment.GetEnvironmentVariable (var);
+        //}
 
-		internal static IDictionary<string, string> GetEnv ()
-		{
-			Dictionary<string, string> dictionary = new Dictionary<string, string> ();
-			foreach (DictionaryEntry v in Environment.GetEnvironmentVariables ()) {
-				dictionary[(string)v.Key] = (string)v.Value;
-			}
-			return dictionary;
-		}
+        //internal static IDictionary<string, string> GetEnv ()
+        //{
+        //    Dictionary<string, string> dictionary = new Dictionary<string, string> ();
+        //    foreach (DictionaryEntry v in Environment.GetEnvironmentVariables ()) {
+        //        dictionary[(string)v.Key] = (string)v.Value;
+        //    }
+        //    return dictionary;
+        //}
 
 		internal static IPAddress GetLocalHost ()
 		{
 			return Dns.GetHostEntry (Dns.GetHostName ()).AddressList[0];
 		}
-		
-		static Hashtable properties;
 
-        public static Hashtable Properties { get { return GetProperties(); } }
-		
-		public static Hashtable GetProperties ()
+        static IDictionary<string, string> properties;
+
+        public static IDictionary<string,string> Properties { get { return GetProperties(); } }
+
+        public static IDictionary<string, string> GetProperties()
 		{
 			if (properties == null) {
-				properties = new Hashtable ();
-				properties ["jgit.fs.debug"] = "false";
-				var home = Environment.GetFolderPath (Environment.SpecialFolder.UserProfile).Trim ();
-				if (string.IsNullOrEmpty (home))
+                properties = new Dictionary<string, string>();
+#if SILVERLIGHT
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData).Trim();
+#else
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Trim();
+#endif
+                if (string.IsNullOrEmpty (home))
 					home = Environment.GetFolderPath (Environment.SpecialFolder.Personal).Trim ();
 				properties ["user.home"] = home;
-				properties ["java.library.path"] = Environment.GetEnvironmentVariable ("PATH");
 				if (Path.DirectorySeparatorChar != '\\')
 					properties ["os.name"] = "Unix";
 				else

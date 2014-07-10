@@ -56,7 +56,7 @@ namespace Couchbase.Lite
 {
     internal static class SqliteExtensions
     {
-        static readonly IDictionary<Type, DbType> TypeMap;
+        //static readonly IDictionary<Type, DbType> TypeMap;
 
         static readonly Regex paramPattern;
 
@@ -64,14 +64,14 @@ namespace Couchbase.Lite
         {
             paramPattern = new Regex("@\\w?");
 
-            TypeMap = new Dictionary<Type, DbType>
-            {
-                { typeof(String), DbType.String },
-                { typeof(Int32), DbType.Int32 },
-                { typeof(Int64), DbType.Int64 },
-                { typeof(byte[]), DbType.Binary },
-                { typeof(Boolean), DbType.Boolean },
-            };
+            //TypeMap = new Dictionary<Type, DbType>
+            //{
+            //    { typeof(String), DbType.String },
+            //    { typeof(Int32), DbType.Int32 },
+            //    { typeof(Int64), DbType.Int64 },
+            //    { typeof(byte[]), DbType.Binary },
+            //    { typeof(Boolean), DbType.Boolean },
+            //};
         }
 
         public static String ReplacePositionalParams(this String sql)
@@ -101,18 +101,18 @@ namespace Couchbase.Lite
 //            return paramArgs;
 //        }
 
-        public static DbType ToDbType(this Type type)
-        {
-            DbType dbType;
-            var success = TypeMap.TryGetValue(type, out dbType);
-            if (!success)
-            {
-                var message = "Failed to determine database type for query param of type {0}".Fmt(type.Name);
-                Log.E("SqliteExtensions", message);
-                throw new ArgumentException(message, "type");
-            }
-            return dbType;
-        }
+        //public static DbType ToDbType(this Type type)
+        //{
+        //    DbType dbType;
+        //    var success = TypeMap.TryGetValue(type, out dbType);
+        //    if (!success)
+        //    {
+        //        var message = "Failed to determine database type for query param of type {0}".Fmt(type.Name);
+        //        Log.E("SqliteExtensions", message);
+        //        throw new ArgumentException(message, "type");
+        //    }
+        //    return dbType;
+        //}
     }
 }
 

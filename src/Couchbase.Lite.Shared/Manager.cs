@@ -119,7 +119,12 @@ namespace Couchbase.Lite
             legalCharactersPattern = new Regex("^[abcdefghijklmnopqrstuvwxyz0123456789_$()+-/]+$");
             mapper = new ObjectWriter();
             DefaultOptions = ManagerOptions.Default;
-            defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+#if SILVERLIGHT
+            var path = Environment.SpecialFolder.ApplicationData;
+#else
+            var path = Environment.SpecialFolder.LocalApplicationData;
+#endif
+            defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(path));
             sharedManager = new Manager(defaultDirectory, ManagerOptions.Default);
         }
 

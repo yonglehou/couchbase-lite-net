@@ -53,7 +53,11 @@ using Sharpen;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Diagnostics;
+#if SILVERLIGHT
+using System.Net;
+#else
 using System.Web;
+#endif
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using System.Net;
@@ -265,7 +269,7 @@ namespace Couchbase.Lite.Replicator
             clientFactory.DeleteCookie(domain, name);
         }
 
-        public CookieContainer GetCookieContainer()
+        public CookieStore GetCookieContainer()
         {
             return clientFactory.GetCookieContainer();
         }

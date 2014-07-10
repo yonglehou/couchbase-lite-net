@@ -136,7 +136,7 @@ namespace Sharpen
 
 		public static CultureInfo CreateLocale (string language, string country, string variant)
 		{
-			return CultureInfo.GetCultureInfo ("en-US");
+			return new CultureInfo("en-US");
 		}
 
 		public static string Name (this Encoding e)
@@ -239,23 +239,23 @@ namespace Sharpen
 				d[val.Key] = val.Value;
 		}
 
-		public static object Put (this Hashtable d, object key, object value)
-		{
-			object old = d [key];
-			d[key] = value;
-			return old;
-		}
+        //public static object Put (this Hashtable d, object key, object value)
+        //{
+        //    object old = d [key];
+        //    d[key] = value;
+        //    return old;
+        //}
 
-		public static string Put (this StringDictionary d, string key, string value)
-		{
-			string old = d [key];
-			d[key] = value;
-			return old;
-		}
+        //public static string Put (this StringDictionary d, string key, string value)
+        //{
+        //    string old = d [key];
+        //    d[key] = value;
+        //    return old;
+        //}
 
 		public static CultureInfo GetEnglishCulture ()
 		{
-			return CultureInfo.GetCultureInfo ("en-US");
+			return new CultureInfo ("en-US");
 		}
 
 		public static T GetFirst<T> (this IList<T> list)
@@ -265,7 +265,7 @@ namespace Sharpen
 
 		public static CultureInfo GetGermanCulture ()
 		{
-			CultureInfo r =  CultureInfo.GetCultureInfo ("de-DE");
+			CultureInfo r =  new CultureInfo ("de-DE");
 			return r;
 		}
 
@@ -814,36 +814,36 @@ namespace Sharpen
 			return new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 		}
 		
-		public static bool RemoveElement (this ArrayList list, object elem)
-		{
-			int i = list.IndexOf (elem);
-			if (i == -1)
-				return false;
-			else {
-				list.RemoveAt (i);
-				return true;
-			}
-		}
+        //public static bool RemoveElement (this ArrayList list, object elem)
+        //{
+        //    int i = list.IndexOf (elem);
+        //    if (i == -1)
+        //        return false;
+        //    else {
+        //        list.RemoveAt (i);
+        //        return true;
+        //    }
+        //}
 		
 		public static System.Threading.Semaphore CreateSemaphore (int count)
 		{
 			return new System.Threading.Semaphore (count, int.MaxValue);
 		}
 		
-		public static void SetCommand (this ProcessStartInfo si, IList<string> args)
-		{
-			si.FileName = args[0];
-			si.Arguments = string.Join (" ", args.Skip (1).Select (a => "\"" + a + "\"").ToArray ());
-		}
+        //public static void SetCommand (this ProcessStartInfo si, IList<string> args)
+        //{
+        //    si.FileName = args[0];
+        //    si.Arguments = string.Join (" ", args.Skip (1).Select (a => "\"" + a + "\"").ToArray ());
+        //}
 		
-		public static SystemProcess Start (this ProcessStartInfo si)
-		{
-			si.UseShellExecute = false;
-			si.RedirectStandardInput = true;
-			si.RedirectStandardError = true;
-			si.RedirectStandardOutput = true;
-			si.CreateNoWindow = true;
-			return SystemProcess.Start (si);
-		}
+        //public static SystemProcess Start (this ProcessStartInfo si)
+        //{
+        //    si.UseShellExecute = false;
+        //    si.RedirectStandardInput = true;
+        //    si.RedirectStandardError = true;
+        //    si.RedirectStandardOutput = true;
+        //    si.CreateNoWindow = true;
+        //    return SystemProcess.Start (si);
+        //}
 	}
 }

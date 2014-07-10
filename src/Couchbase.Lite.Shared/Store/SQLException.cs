@@ -45,7 +45,9 @@ using Sharpen;
 
 namespace Couchbase.Lite.Storage
 {
+#if !SILVERLIGHT
 	[System.Serializable]
+#endif
     public class SQLException : Exception
 	{
 		public SQLException()

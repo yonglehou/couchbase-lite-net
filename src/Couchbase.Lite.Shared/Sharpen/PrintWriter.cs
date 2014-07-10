@@ -99,12 +99,14 @@ namespace Sharpen
 		{
 			writer.Write (buffer);
 		}
-	
+
+#if !SILVERLIGHT
 		public override void Write (string format, object arg0, object arg1, object arg2)
 		{
 			writer.Write (format, arg0, arg1, arg2);
 		}
-	
+#endif
+
 		public override void Write (string format, object arg0, object arg1)
 		{
 			writer.Write (format, arg0, arg1);
@@ -130,11 +132,13 @@ namespace Sharpen
 			writer.WriteLine (buffer);
 		}
 	
+#if !SILVERLIGHT
 		public override void WriteLine (string format, object arg0, object arg1, object arg2)
 		{
 			writer.WriteLine (format, arg0, arg1, arg2);
 		}
-	
+#endif
+
 		public override void WriteLine (string format, object arg0, object arg1)
 		{
 			writer.WriteLine (format, arg0, arg1);

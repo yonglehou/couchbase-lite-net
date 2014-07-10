@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic; 
 using System.Diagnostics;
+#if !SILVERLIGHT
 using System.Collections.Concurrent;
+#endif
 using System.Threading.Tasks;
 using System.Threading; 
 
@@ -12,7 +14,11 @@ namespace Couchbase.Lite.Util
     { 
         [ThreadStatic] 
         private static bool allowInlining; 
+#if SILVERLIGHT
+        private readonly Queue<Task> queue = new Queue<Task>();
+#else
         private readonly BlockingCollection<Task> queue = new BlockingCollection<Task>(new ConcurrentQueue<Task>());
+#endif
         private const int maxConcurrency = 1;
         private int runningTasks = 0;
 
@@ -20,7 +26,11 @@ namespace Couchbase.Lite.Util
         /// <param name="task">The task to be queued.</param> 
         protected override void QueueTask(Task task) 
         { 
+#if SILVERLIGHT
+            queue.Enqueue(task);
+#else
             queue.Add (task); 
+#endif
             if (runningTasks < maxConcurrency)
             {
                 ++runningTasks; 
@@ -30,7 +40,11 @@ namespace Couchbase.Lite.Util
 
         private void QueueThreadPoolWorkItem() 
         { 
+#if SILVERLIGHT
+            ThreadPool.QueueUserWorkItem(s =>
+#else
             ThreadPool.UnsafeQueueUserWorkItem(s => 
+#endif
                 { 
                     allowInlining = true; 
                     try 
@@ -42,17 +56,29 @@ namespace Couchbase.Lite.Util
                             { 
                                 --runningTasks; 
                                 break; 
-                            } 
+                            }
 
-                            task = queue.Take(); 
+#if SILVERLIGHT
+                            task = queue.Dequeue();
+#else
+                            task = queue.Take();
+#endif
                             var success = TryExecuteTask(task);
                             if (!success && task.Status != TaskStatus.Canceled && task.Status != TaskStatus.RanToCompletion)
+#if SILVERLIGHT
+                                Debug.WriteLine("Scheduled task failed to execute.\r\n{0}", task.Exception.ToString());
+#else
                                 Trace.TraceError("Scheduled task failed to execute.", task.Exception.ToString());
+#endif
                         } 
                     }
                     catch (Exception e)
                     {
+#if SILVERLIGHT
+                        Debug.WriteLine("Scheduled task failed to execute.\r\n{0}", e.ToString());
+#else
                         Trace.TraceError("Unhandled exception in runloop", e.ToString());
+#endif
                         throw;
                     }
                     finally 

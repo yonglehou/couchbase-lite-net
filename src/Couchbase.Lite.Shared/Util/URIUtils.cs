@@ -42,7 +42,11 @@
 
 using System;
 using System.Text;
+#if SILVERLIGHT
+using System.Net;
+#else
 using System.Web;
+#endif
 
 using Sharpen;
 using System.Linq;
@@ -79,7 +83,11 @@ namespace Couchbase.Lite.Util
 			}
 			try
 			{
+#if SILVERLIGHT
+                return HttpUtility.UrlDecode(s);
+#else
                 return HttpUtility.UrlDecode(s, Encoding.UTF8);
+#endif
 			}
 			catch (UnsupportedEncodingException e)
 			{
@@ -309,7 +317,11 @@ namespace Couchbase.Lite.Util
 						i += 3;
 					}
 					while (i < s.Length && s[i] == '%');
+#if SILVERLIGHT
+                    result.Append(charset.GetString(@out.ToByteArray(), 0, (int)@out.Size()));
+#else
                     result.Append(charset.GetString(@out.ToByteArray()));
+#endif
                     @out.Reset();
 				}
 				else

@@ -41,7 +41,9 @@
 //
 
 using System;
+#if !SILVERLIGHT
 using System.Collections.Concurrent;
+#endif
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -102,7 +104,7 @@ namespace Couchbase.Lite.Support
             cookieStore.Delete(uri, name);
         }
 
-        public CookieContainer GetCookieContainer()
+        public CookieStore GetCookieContainer()
         {
             return cookieStore;
         }

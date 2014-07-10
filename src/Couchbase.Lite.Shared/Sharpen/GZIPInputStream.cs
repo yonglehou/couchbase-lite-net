@@ -46,13 +46,13 @@ namespace Sharpen
 	using System;
 	using System.IO.Compression;
 
-	internal class GZIPInputStream : InputStream
+	internal static class GZIPInputStream //: InputStream
 	{
         public static readonly int GzipMagic = 0;
 
-		public GZIPInputStream (InputStream s)
-		{
-			Wrapped = new GZipStream (s, CompressionMode.Decompress);
-		}
+        //public GZIPInputStream (InputStream s)
+        //{
+        //    Wrapped = new GZipStream (s, CompressionMode.Decompress);
+        //}
 	}
 }

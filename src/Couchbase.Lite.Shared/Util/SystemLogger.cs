@@ -47,15 +47,47 @@ using Sharpen;
 using System.Diagnostics;
 using System.Threading;
 
+#if SILVERLIGHT
+using Trace = System.Diagnostics.Debug;
+#endif
+
 namespace Couchbase.Lite.Util
 {
+
+#if SILVERLIGHT
+    public class TraceShim
+    {
+        public void WriteLine(string message)
+        {
+            Debug.WriteLine(message);
+        }
+
+        internal void TraceInformation(string message)
+        {
+            WriteLine(message);
+        }
+
+        internal void TraceError(string message)
+        {
+            WriteLine(message);
+        }
+    }
+#endif
+
 	public class SystemLogger : ILogger
 	{
+#if SILVERLIGHT
+        TraceShim Trace = new TraceShim();
+#endif
 		public virtual void V(string tag, string msg)
 		{
             try {
                 Trace.WriteLine(tag + ": " + msg);
-            } catch (ThreadInterruptedException ex) {
+#if SILVERLIGHT
+            } catch (Exception) {
+#else
+            } catch (ThreadInterruptedException) {
+#endif
                 // swallow.
             }
 		}
@@ -114,10 +146,10 @@ namespace Couchbase.Lite.Util
 		{
 			if (tr == null)
 			{
-                return Environment.StackTrace;
-			}
-			StringWriter stringWriter = new StringWriter();
-			PrintWriter printWriter = new PrintWriter(stringWriter);
+                return new System.Diagnostics.StackTrace().ToString();
+            }
+			var stringWriter = new StringWriter();
+			var printWriter = new PrintWriter(stringWriter);
             Runtime.PrintStackTrace(tr, printWriter);
 			return stringWriter.ToString();
 		}

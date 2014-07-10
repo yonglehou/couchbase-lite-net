@@ -76,10 +76,10 @@ namespace Sharpen
 			return default(V);
 		}
 
-		public static object[] ToArray (ArrayList list)
-		{
-			return list.ToArray ();
-		}
+        //public static object[] ToArray (ArrayList list)
+        //{
+        //    return list.ToArray ();
+        //}
 
 		public static T[] ToArray<T> (ICollection<T> list)
 		{

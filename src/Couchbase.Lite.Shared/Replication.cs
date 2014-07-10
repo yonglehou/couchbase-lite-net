@@ -43,7 +43,11 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+#if SILVERLIGHT
+using CookieContainer = Couchbase.Lite.Util.CookieContainer;
+#else
 using System.Web;
+#endif
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.IO;

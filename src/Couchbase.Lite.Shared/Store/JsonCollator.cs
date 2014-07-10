@@ -312,9 +312,13 @@ namespace Couchbase.Lite
 
             // TODO: Detect current localization and use the corresponding CompareInfo
             var comp = CultureInfo.InvariantCulture.CompareInfo;
+#if SILVERLIGHT
+            return comp.Compare(s1, s2, CompareOptions.StringSort);
+#else
             var sk1 = comp.GetSortKey(s1);
             var sk2 = comp.GetSortKey(s2);
             return SortKey.Compare(sk1, sk2);
+#endif
         }
 
         ///

@@ -67,15 +67,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 using System;
+#if SILVERLIGHT
+using System.Net;
+#else
 using System.Web;
-
+#endif
 namespace Sharpen
 {
 	internal static class URLEncoder
 	{
 		public static string Encode (string str, string encoding)
 		{
+#if SILVERLIGHT
+            return HttpUtility.UrlEncode(str);
+#else
             return HttpUtility.UrlEncode (str, Extensions.GetEncoding (encoding));
+#endif
 		}
 	}
 }

@@ -82,7 +82,7 @@ namespace Couchbase.Lite.Shared
                 var status = raw.sqlite3_open_v2(path, out db, flags, null);
                 if (status != raw.SQLITE_OK)
                 {
-                    throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
+                    throw new SQLException(errMessage);
                 }
 #if __ANDROID__
 #else
@@ -138,13 +138,13 @@ namespace Couchbase.Lite.Shared
             lock (dbLock) { statement = db.prepare (commandText); }
 
             if (raw.sqlite3_bind_int(statement, 1, version) == raw.SQLITE_ERROR)
-                throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
+                throw new SQLException(errMessage);
 
             int result;
             try {
                 result = statement.step();
                 if (result != SQLiteResult.OK)
-                    throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
+                    throw new SQLException(errMessage);
             } catch (Exception e) {
                 Log.E(Tag, "Error getting user version", e);
             } finally {
@@ -220,7 +220,7 @@ namespace Couchbase.Lite.Shared
                 try {
                     var result = command.step();
                     if (result == SQLiteResult.ERROR)
-                        throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
+                        throw new SQLException(raw.sqlite3_errmsg(db));
                 } catch (Exception e) {
                     Log.E(Tag, "Error {0} executing sql '{1}'".Fmt(db.extended_errcode(), sql), e);
                     throw;
@@ -230,12 +230,7 @@ namespace Couchbase.Lite.Shared
             }
         }
 
-        public Cursor RawQuery (String sql, params Object[] paramArgs)
-        {
-            return RawQuery(sql, CommandBehavior.Default, paramArgs);
-        }
-
-        public Cursor RawQuery (String sql, CommandBehavior behavior, params Object[] paramArgs)
+        public Cursor RawQuery(String sql, params Object[] paramArgs)
         {
             Cursor cursor = null;
             var command = BuildCommand (sql, paramArgs);
@@ -253,7 +248,7 @@ namespace Couchbase.Lite.Shared
                 }
 
                 Log.E(Tag, "Error executing raw query '{0}'".Fmt(sql), e);
-                throw;
+                throw new SQLException(e);
             } 
 
             return cursor;
@@ -281,7 +276,7 @@ namespace Couchbase.Lite.Shared
                     result = command.step ();
                 }
                 if (result == SQLiteResult.ERROR)
-                    throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
+                    throw new SQLException(raw.sqlite3_errmsg(db));
 
                 int changes;
                 lock (dbLock) {
@@ -296,7 +291,7 @@ namespace Couchbase.Lite.Shared
 
                 if (lastInsertedId == -1L) {
                     Log.E(Tag, "Error inserting " + initialValues + " using " + command);
-                    throw new CouchbaseLiteException("Error inserting " + initialValues + " using " + command, StatusCode.DbError);
+                    throw new SQLException("Error inserting " + initialValues + " using " + command);
                 } else {
                     Log.V(Tag, "Inserting row " + lastInsertedId + " from " + initialValues + " using " + command);
                 }
@@ -324,13 +319,13 @@ namespace Couchbase.Lite.Shared
                 try {
                     var result = command.step();
                     if (result == SQLiteResult.ERROR)
-                        throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
+                        throw new SQLException(raw.sqlite3_errmsg(db));
 
                     resultCount = db.changes();
                     if (resultCount < 0) 
                     {
                         Log.E(Tag, "Error updating " + values + " using " + command);
-                        throw new CouchbaseLiteException("Failed to update any records.", StatusCode.DbError);
+                        throw new SQLException("Failed to update any records.");
                     }
                 } catch (Exception ex) {
                     Log.E(Tag, "Error updating table " + table, ex);
@@ -352,12 +347,12 @@ namespace Couchbase.Lite.Shared
                 try {
                     var result = command.step();
                     if (result == SQLiteResult.ERROR)
-                        throw new CouchbaseLiteException("Error deleting from table " + table, StatusCode.DbError);
+                        throw new SQLException("Error deleting from table " + table);
 
                     resultCount = db.changes();
                     if (resultCount < 0)
                     {
-                        throw new CouchbaseLiteException("Failed to delete the records.", StatusCode.DbError);
+                        throw new SQLException("Failed to delete the records.");
                     }
 
                 } catch (Exception ex) {
