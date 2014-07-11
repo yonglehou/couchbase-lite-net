@@ -79,7 +79,6 @@
       <HintPath>..\packages\Newtonsoft.Json.6.0.3\lib\portable-net40+sl4+wp7+win8\Newtonsoft.Json.dll</HintPath>
     </Reference>
     <Reference Include="System.Data" />
-    <Reference Include="System.Web.Services" />
     <Reference Include="SQLitePCL.raw">
       <HintPath>..\packages\SQLitePCL.raw_basic.0.4.0-alpha\lib\MonoAndroid\SQLitePCL.raw.dll</HintPath>
     </Reference>

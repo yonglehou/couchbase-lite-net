@@ -53,11 +53,6 @@ using Sharpen;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Diagnostics;
-#if SILVERLIGHT
-using System.Net;
-#else
-using System.Web;
-#endif
 
 namespace Couchbase.Lite.Replicator
 {

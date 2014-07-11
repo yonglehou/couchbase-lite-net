@@ -41,15 +41,9 @@
 //
 
 using System;
-using System.Text;
-#if SILVERLIGHT || STORE
-using System.Net;
-#else
-using System.Web;
-#endif
-
-using Sharpen;
 using System.Linq;
+using System.Text;
+using Sharpen;
 
 namespace Couchbase.Lite.Util
 {
@@ -83,13 +77,7 @@ namespace Couchbase.Lite.Util
 			}
 			try
 			{
-#if SILVERLIGHT
-                return HttpUtility.UrlDecode(s);
-#elif STORE
                 return Uri.UnescapeDataString(s);
-#else
-                return Uri.UnescapeDataString(s);// HttpUtility.UrlDecode(s, Encoding.UTF8);
-#endif
 			}
 			catch (UnsupportedEncodingException e)
 			{

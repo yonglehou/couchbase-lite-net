@@ -42,19 +42,11 @@
 
 using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.IO;
-using Couchbase.Lite;
-using Couchbase.Lite.Replicator;
-using Couchbase.Lite.Util;
-using Sharpen;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
-#if !SILVERLIGHT
-using System.Web;
-#endif
 using System.Threading;
+using Couchbase.Lite;
+using Couchbase.Lite.Util;
 
 namespace Couchbase.Lite.Replicator
 {

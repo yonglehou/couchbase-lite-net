@@ -52,11 +52,7 @@ using Couchbase.Lite.Util;
 using Sharpen;
 using System.Threading.Tasks;
 using System.Net.Http;
-#if SILVERLIGHT
 using System.Net;
-#else
-using System.Web;
-#endif
 using System.Net.Http.Headers;
 using Newtonsoft.Json.Linq;
 using System.Linq;
