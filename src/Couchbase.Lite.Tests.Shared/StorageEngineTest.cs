@@ -52,7 +52,7 @@ namespace Couchbase.Lite
                 { 
                     storageEngine.ExecSQL("DROP TABLE IF EXISTS testtrans"); 
                 } 
-                catch (Exception e) { }
+                catch (Exception) { }
             }
         }
     }

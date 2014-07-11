@@ -46,6 +46,7 @@ using System.Net.Http;
 using System.Collections.Generic;
 using Couchbase.Lite.Support;
 using Couchbase.Lite.Replicator;
+using Couchbase.Lite.Util;
 
 namespace Couchbase.Lite.Tests
 {
@@ -77,7 +78,7 @@ namespace Couchbase.Lite.Tests
             throw new NotImplementedException();
         }
 
-        public CookieContainer GetCookieContainer()
+        public CookieStore GetCookieContainer()
         {
             throw new NotImplementedException();
         }

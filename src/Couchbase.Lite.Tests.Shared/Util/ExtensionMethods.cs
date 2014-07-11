@@ -44,12 +44,13 @@ using System;
 using System.Collections;
 using Sharpen;
 using System.Text;
+using System.Collections.Generic;
 
 namespace Couchbase.Lite.Tests
 {
     public static class ExtensionMethods
     {
-        public static void Load(this Hashtable props, System.IO.Stream stream)
+        public static void Load(this IDictionary<string,string> props, System.IO.Stream stream)
         {
             using (var reader = new InputStreamReader((InputStream)stream, Encoding.UTF8))
             {

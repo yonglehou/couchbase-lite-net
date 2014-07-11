@@ -60,7 +60,7 @@ namespace Couchbase.Lite
     [TestFixture]
 	public abstract class LiteTestCase
 	{
-		public const string Tag = "LiteTestCase";
+		private const string Tag = "LiteTestCase";
 
         public const string FacebookAppId = "719417398131095";
 
@@ -251,7 +251,7 @@ namespace Couchbase.Lite
 		}
 
         [TearDown]
-        protected void TearDown()
+        protected virtual void TearDown()
 		{
 			Log.V(Tag, "tearDown");
 			StopDatabase();
@@ -324,7 +324,7 @@ namespace Couchbase.Lite
 						conn.SetRequestProperty(header, headers[header]);
 					}
 				}
-                var allProperties = conn.GetRequestProperties();
+                //var allProperties = conn.GetRequestProperties();
 				if (bodyObj != null)
 				{
                     //conn.SetDoInput(true);
@@ -350,8 +350,6 @@ namespace Couchbase.Lite
 		{
             Object result = null;
             var stream = conn.GetOutputStream();
-            var bytesRead = 0L;
-            const Int32 chunkSize = 8192;
              
             var bytes = stream.ReadAllBytes();
 
@@ -390,13 +388,13 @@ namespace Couchbase.Lite
 			return result;
 		}
 
-        protected internal virtual object Send(string method, string path, HttpStatusCode expectedStatus
+        protected virtual object Send(string method, string path, HttpStatusCode expectedStatus
 			, object expectedResult)
 		{
             return SendBody(method, path, null, (int)expectedStatus, expectedResult);
 		}
 
-        protected internal void CreateDocuments(Database db, int n) {
+        protected virtual void CreateDocuments(Database db, int n) {
             for (int i = 0; i < n; i++) {
                 var properties = new Dictionary<string, object>();
                 properties.Add("testName", "testDatabase");
@@ -405,7 +403,7 @@ namespace Couchbase.Lite
             }
         }
 
-        protected internal Document CreateDocumentWithProperties(Database db, IDictionary<string, object> properties) 
+        protected virtual Document CreateDocumentWithProperties(Database db, IDictionary<string, object> properties) 
         {
             var doc = db.CreateDocument();
 

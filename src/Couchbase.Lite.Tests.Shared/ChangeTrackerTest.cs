@@ -53,12 +53,13 @@ using System.Web;
 using System.Net.Http;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Couchbase.Lite.Tests;
 
-namespace Couchbase.Lite.Tests
+namespace Couchbase.Lite
 {
 	public class ChangeTrackerTest : LiteTestCase
 	{
-		public const string Tag = "ChangeTracker";
+//		public const string Tag = "ChangeTracker";
 
         private class ChangeTrackerTestClient : IChangeTrackerClient
         {
@@ -122,7 +123,7 @@ namespace Couchbase.Lite.Tests
                 HttpClientFactory.DeleteCookie(domain, name);
             }
 
-            public CookieContainer GetCookieContainer()
+            public CookieStore GetCookieContainer()
             {
                 return HttpClientFactory.GetCookieContainer();
             }
@@ -131,12 +132,7 @@ namespace Couchbase.Lite.Tests
 
             #region IHttpClientFactory implementation
 
-            public HttpClient GetHttpClient()
-            {
-                return HttpClientFactory.GetHttpClient();
-            }
-
-            public HttpClient GetHttpClient(ICredentials credentials)
+            public HttpClient GetHttpClient(ICredentials credentials = null)
             {
                 return HttpClientFactory.GetHttpClient(credentials);
             }
@@ -242,8 +238,8 @@ namespace Couchbase.Lite.Tests
             Assert.IsTrue(success);
         }
 
-        private MockHttpRequestHandler.HttpResponseDelegate RunChangeTrackerTransientErrorDefaultResponder() {
-            MockHttpRequestHandler.HttpResponseDelegate responder = (request) =>
+        private HttpResponseDelegate RunChangeTrackerTransientErrorDefaultResponder() {
+            HttpResponseDelegate responder = (request) =>
             {
                 var json = "{\"results\":[\n" +
                     "{\"seq\":\"1\",\"id\":\"doc1-138\",\"changes\":[{\"rev\":\"1-82d\"}]}],\n" +
@@ -263,13 +259,13 @@ namespace Couchbase.Lite.Tests
             var changeReceivedSignal = new CountDownLatch(numExpectedChangeCallbacks);
             var client = new ChangeTrackerTestClient(changeTrackerFinishedSignal, changeReceivedSignal);
 
-            MockHttpRequestHandler.HttpResponseDelegate sentinal = RunChangeTrackerTransientErrorDefaultResponder();
+            HttpResponseDelegate sentinal = RunChangeTrackerTransientErrorDefaultResponder();
 
-            var responders = new List<MockHttpRequestHandler.HttpResponseDelegate>();
+            var responders = new List<HttpResponseDelegate>();
             responders.Add(RunChangeTrackerTransientErrorDefaultResponder());
             responders.Add(MockHttpRequestHandler.TransientErrorResponder(errorCode, statusMessage));
 
-            MockHttpRequestHandler.HttpResponseDelegate chainResponder = (request) =>
+            HttpResponseDelegate chainResponder = (request) =>
             {
                 if (responders.Count > 0) {
                     var responder = responders[0];
@@ -398,12 +394,11 @@ namespace Couchbase.Lite.Tests
 			docIds.AddItem("doc2");
 			changeTrackerDocIds.SetDocIDs(docIds);
 
-            var docIdsEncoded = HttpUtility.UrlEncode("[\"doc1\",\"doc2\"]");
+            var docIdsEncoded = Uri.EscapeDataString("[\"doc1\",\"doc2\"]").ToLowerInvariant();
             var expectedFeedPath = string.Format("_changes?feed=longpoll&limit=50&heartbeat=300000&since=0&filter=_doc_ids&doc_ids={0}", 
                 docIdsEncoded);
 			string changesFeedPath = changeTrackerDocIds.GetChangesFeedPath();
 			Assert.AreEqual(expectedFeedPath, changesFeedPath);
-
             // TODO: Test POST BODY When ChangeTracker implements POST requests
             // https://github.com/couchbaselabs/couchbase-lite-net/issues/71
 		}

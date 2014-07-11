@@ -59,17 +59,19 @@ namespace Couchbase.Lite
 	/// <remarks>Created by andrey on 12/3/13.</remarks>
     public class ApiTest : LiteTestCase
 	{
-        public static Task CreateDocumentsAsync(Database db, int n)
+        private const string Tag = "ApiTest";
+
+        public Task CreateDocumentsAsync(Database db, int n)
 		{
             return db.RunAsync((database)=>
                 {
                     database.BeginTransaction();
-                    ApiTest.CreateDocuments(database, n);
+                    CreateDocuments(database, n);
                     database.EndTransaction(true);
                 });
 		}
 
-  		public static void CreateDocuments(Database db, int numberOfDocsToCreate)
+  		protected override void CreateDocuments(Database db, int numberOfDocsToCreate)
 		{
 			//TODO should be changed to use db.runInTransaction
 			for (int i = 0; i < numberOfDocsToCreate; i++)
@@ -81,7 +83,7 @@ namespace Couchbase.Lite
 			}
 		}
 
-        public static Document CreateDocumentWithProperties(Database db, IDictionary<String, Object> properties)
+        protected override Document CreateDocumentWithProperties(Database db, IDictionary<String, Object> properties)
 		{
             var doc = db.CreateDocument();
 
@@ -848,7 +850,7 @@ namespace Couchbase.Lite
 
             var task = query.RunAsync().ContinueWith((resultTask) => 
             {
-                Log.I (LiteTestCase.Tag, "Async query finished!");
+                Log.I (Tag, "Async query finished!");
                 var rows = resultTask.Result;
 
                 Assert.IsNotNull (rows);

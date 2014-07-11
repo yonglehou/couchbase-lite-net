@@ -52,14 +52,14 @@ using Newtonsoft.Json.Linq;
 
 namespace Couchbase.Lite.Tests
 {
+    #region Global Delegates
+
+    public delegate HttpResponseMessage HttpResponseDelegate(HttpRequestMessage request);
+
+    #endregion
+
     public class MockHttpRequestHandler : HttpClientHandler
     {
-        #region Global Delegates
-
-        public delegate HttpResponseMessage HttpResponseDelegate(HttpRequestMessage request);
-
-        #endregion
-
         #region Constructors
 
         public MockHttpRequestHandler()
