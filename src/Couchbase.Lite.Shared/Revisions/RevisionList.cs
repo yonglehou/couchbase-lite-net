@@ -48,7 +48,7 @@ using Sharpen;
 namespace Couchbase.Lite
 {
 	/// <summary>An ordered list of TDRevisions</summary>
-#if !SILVERLIGHT
+#if !SILVERLIGHT && !STORE
     [System.Serializable]
 #endif
     internal class RevisionList : AList<RevisionInternal>

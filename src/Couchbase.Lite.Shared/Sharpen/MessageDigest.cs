@@ -45,7 +45,9 @@ namespace Sharpen
 {
 	using System;
 	using System.IO;
-	using System.Security.Cryptography;
+#if !STORE
+    using System.Security.Cryptography;
+#endif
 
 	internal abstract class MessageDigest
 	{
@@ -70,11 +72,18 @@ namespace Sharpen
 		public static MessageDigest GetInstance (string algorithm)
 		{
 			switch (algorithm.ToLower ()) {
-			case "sha-1":
-				return new MessageDigest<SHA1Managed> ();
+#if STORE
+            case "sha-1":
+                return new PortableMessageDigest(PCLCrypto.HashAlgorithm.Sha1);
 			case "md5":
-				return new MessageDigest<MD5CryptoServiceProvider> ();
-			}
+                return new PortableMessageDigest(PCLCrypto.HashAlgorithm.Md5);
+#else
+			case "sha-1":
+                    return new MessageDigest<SHA1CryptoServiceProvider>();
+			case "md5":
+                    return new MessageDigest<HMACMD5>();
+#endif
+            }
 			throw new NotSupportedException (string.Format ("The requested algorithm \"{0}\" is not supported.", algorithm));
 		}
 
@@ -84,65 +93,130 @@ namespace Sharpen
 		public abstract void Update (byte[] b, int offset, int len);
 	}
 
+#if STORE
+    internal class PortableMessageDigest : MessageDigest, IDisposable
+    {
+        public PortableMessageDigest(PCLCrypto.HashAlgorithm algorithm)
+        {
+            Provider = PCLCrypto.WinRTCrypto.HashAlgorithmProvider.OpenAlgorithm(algorithm);
+            Init();
+        }
 
-	internal class MessageDigest<TAlgorithm> : MessageDigest where TAlgorithm : HashAlgorithm, new()
-	{
-		private TAlgorithm _hash;
-		private CryptoStream _stream;
+        void Init()
+        {
+            Hash = Provider.CreateHash();
+            HashStream = new PCLCrypto.CryptoStream(Stream.Null, Hash, PCLCrypto.CryptoStreamMode.Write);
+        }
 
-		public MessageDigest ()
-		{
-			this.Init ();
-		}
+        public override byte[] Digest()
+        {
+            HashStream.FlushFinalBlock();
+            var hash = Hash.GetValueAndReset();
+            return hash;
+        }
 
-		public override byte[] Digest ()
-		{
-			this._stream.FlushFinalBlock ();
-			byte[] hash = this._hash.Hash;
-			this.Reset ();
-			return hash;
-		}
+        public override int GetDigestLength()
+        {
+            return Provider.HashLength;
+        }
 
-		public void Dispose ()
-		{
-			if (this._stream != null) {
-				this._stream.Dispose ();
-			}
-			this._stream = null;
-		}
+        public override void Reset()
+        {
+            Dispose();
+            Init();
+        }
 
-		public override int GetDigestLength ()
-		{
-			return (this._hash.HashSize / 8);
-		}
+        public override void Update(byte[] b)
+        {            
+            HashStream.Write(b, 0, b.Length);
+        }
 
-		private void Init ()
-		{
-			this._hash = Activator.CreateInstance<TAlgorithm> ();
-			this._stream = new CryptoStream (Stream.Null, this._hash, CryptoStreamMode.Write);
-		}
+        public override void Update(byte b)
+        {
+            HashStream.WriteByte(b);
+        }
 
-		public override void Reset ()
-		{
-			this.Dispose ();
-			this.Init ();
-		}
+        public override void Update(byte[] b, int offset, int len)
+        {
+            System.Diagnostics.Debug.Assert(len > 0);
+            HashStream.Write(b, offset, len);
+        }
 
-		public override void Update (byte[] input)
-		{
-			this._stream.Write (input, 0, input.Length);
-		}
+        public PCLCrypto.IHashAlgorithmProvider Provider { get; private set; }
 
-		public override void Update (byte input)
-		{
-			this._stream.WriteByte (input);
-		}
+        public PCLCrypto.CryptographicHash Hash { get; set; }
 
-		public override void Update (byte[] input, int index, int count)
-		{
-			if (count < 0)
-				Console.WriteLine ("Argh!");
-			this._stream.Write (input, index, count);
-		}
-	}
+        public PCLCrypto.CryptoStream HashStream { get; set; }
+
+        public void Dispose()
+        {
+            if (HashStream != null)
+            {
+                HashStream.Dispose();
+            }
+            HashStream = null;
+        }
+    }
+#else
+    internal class MessageDigest<TAlgorithm> : MessageDigest where TAlgorithm : HashAlgorithm, new()
+    {
+        private TAlgorithm _hash;
+        private CryptoStream _stream;
+
+        public MessageDigest ()
+        {
+            this.Init ();
+        }
+
+        public override byte[] Digest ()
+        {
+            this._stream.FlushFinalBlock ();
+            byte[] hash = this._hash.Hash;
+            this.Reset ();
+            return hash;
+        }
+
+        public void Dispose ()
+        {
+            if (this._stream != null) {
+                this._stream.Dispose ();
+            }
+            this._stream = null;
+        }
+
+        public override int GetDigestLength ()
+        {
+            return (this._hash.HashSize / 8);
+        }
+
+        private void Init ()
+        {
+            this._hash = Activator.CreateInstance<TAlgorithm> ();
+            this._stream = new CryptoStream (Stream.Null, this._hash, CryptoStreamMode.Write);
+        }
+
+        public override void Reset ()
+        {
+            this.Dispose ();
+            this.Init ();
+        }
+
+        public override void Update (byte[] input)
+        {
+            this._stream.Write (input, 0, input.Length);
+        }
+
+        public override void Update (byte input)
+        {
+            this._stream.WriteByte (input);
+        }
+
+        public override void Update (byte[] input, int index, int count)
+        {
+            if (count < 0)
+                Console.WriteLine ("Argh!");
+            this._stream.Write (input, index, count);
+        }
+    }
+#endif
 }

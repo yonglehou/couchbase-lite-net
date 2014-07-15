@@ -44,9 +44,13 @@
 namespace Sharpen
 {
 	using System;
-	using System.IO;
+#if PORTABLE
+    using PCLStorage.Exceptions;
+#else
+    using System.IO;
+#endif
 
-	internal class FileOutputStream : OutputStream
+    internal class FileOutputStream : OutputStream
 	{
 		public FileOutputStream (FilePath file): this (file.GetPath (), false)
 		{
@@ -64,18 +68,26 @@ namespace Sharpen
 		{
 			try {
 				if (append) {
-                    base.Wrapped = File.Open (file, System.IO.FileMode.Append, FileAccess.Write, FileShare.Write);
-				} else {
-                    base.Wrapped = File.Open (file, System.IO.FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
-				}
+#if PORTABLE
+                    base.Wrapped = PCLStorage.FileSystem.Current.LocalStorage.GetFileAsync(file).Result.OpenAsync(PCLStorage.FileAccess.ReadAndWrite).Result;
+#else
+                    base.Wrapped = File.Open(file, System.IO.FileMode.Append, FileAccess.Write, FileShare.Write);
+#endif
+                } else {
+#if PORTABLE
+                    base.Wrapped = PCLStorage.FileSystem.Current.LocalStorage.GetFileAsync(file).Result.OpenAsync(PCLStorage.FileAccess.ReadAndWrite).Result;
+#else
+                    base.Wrapped = File.Open(file, System.IO.FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
+#endif
+                }
 			} catch (DirectoryNotFoundException) {
 				throw new FileNotFoundException ("File not found: " + file);
 			}
 		}
 
-		public FileChannel GetChannel ()
-		{
-			return new FileChannel ((FileStream)base.Wrapped);
-		}
+        //public FileChannel GetChannel ()
+        //{
+        //    return new FileChannel ((FileStream)base.Wrapped);
+        //}
 	}
 }

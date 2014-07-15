@@ -51,7 +51,7 @@ using Couchbase.Lite.Internal;
 using System.Threading.Tasks;
 using System.Text;
 using System.Diagnostics;
-using System.Data;
+//using System.Data;
 using Couchbase.Lite.Replicator;
 using Couchbase.Lite.Support;
 using Newtonsoft.Json.Linq;
@@ -913,7 +913,7 @@ PRAGMA user_version = 3;";
                     {
                         throw new CouchbaseLiteException(StatusCode.BadRequest);
                     }
-                    newRevID = Sharpen.Extensions.ToString(++generation) + "-local";
+                    newRevID = (++generation).ToString() + "-local";
 
                     var values = new ContentValues();
                     values["revid"] = newRevID;
@@ -2719,7 +2719,7 @@ PRAGMA user_version = 3;";
             for (var i = 0; i < revIDs.Count; i++)
             {
                 var revID = revIDs[i];
-                revIDs.Set(i, Sharpen.Extensions.ToString(start--) + "-" + revID);
+                revIDs.Set(i, (start--).ToString() + "-" + revID);
             }
             return revIDs;
         }
@@ -3688,7 +3688,7 @@ PRAGMA user_version = 3;";
             }
             var digest = Misc.TDCreateUUID();
             // TODO: Generate canonical digest of body
-            return Sharpen.Extensions.ToString(generation + 1) + "-" + digest;
+            return (generation + 1).ToString() + "-" + digest;
         }
 
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>

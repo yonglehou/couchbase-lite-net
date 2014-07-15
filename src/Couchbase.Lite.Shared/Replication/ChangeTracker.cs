@@ -234,8 +234,12 @@ namespace Couchbase.Lite.Replicator
 			{
 				result = new Uri(dbURLString);
 			}
-			catch (UriFormatException e)
-			{
+#if STORE
+            catch (ArgumentOutOfRangeException e)
+#else
+            catch (UriFormatException e)
+#endif
+            {
                 Log.E(Tag, this + ": Changes feed ULR is malformed", e);
 			}
 			return result;

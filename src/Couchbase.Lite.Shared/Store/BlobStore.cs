@@ -46,6 +46,11 @@ using System.IO;
 using Couchbase.Lite;
 using Couchbase.Lite.Util;
 using Sharpen;
+#if STORE
+using FileInfo = PCLStorage.IFile;
+#else
+using FileInfo = System.IO.FileInfo;
+#endif
 
 namespace Couchbase.Lite
 {
@@ -56,6 +61,8 @@ namespace Couchbase.Lite
 	/// </remarks>
 	public class BlobStore
 	{
+        const string Tag = "BlobStore";
+
 		public static string FileExtension = ".blob";
 
 		public static string TmpFileExtension = ".blobtmp";
@@ -94,7 +101,7 @@ namespace Couchbase.Lite
 			return result;
 		}
 
-        public static BlobKey KeyForBlobFromFile(FileInfo file)
+        public static BlobKey KeyForBlobFromFile(string path)
 		{
 			MessageDigest md;
 			try
@@ -109,8 +116,18 @@ namespace Couchbase.Lite
 			byte[] sha1hash = new byte[40];
 			try
 			{
-                var fis = new FileInputStream(file);
-				byte[] buffer = new byte[65536];
+				var buffer = new byte[65536];
+#if PORTABLE
+                var inStream = PCLStorage.FileSystem.Current.GetFileFromPathAsync(path).Result.OpenAsync(PCLStorage.FileAccess.Read).Result;
+                var lenRead = inStream.Read(buffer, 0, buffer.Length);
+                while (lenRead > 0)
+                {
+                    md.Update(buffer, 0, lenRead);
+                    lenRead = inStream.Read(buffer, 0, buffer.Length);
+                }
+                inStream.Dispose();
+#else
+                var fis = new FileInputStream(path);
 				int lenRead = fis.Read(buffer);
 				while (lenRead > 0)
 				{
@@ -118,6 +135,7 @@ namespace Couchbase.Lite
 					lenRead = fis.Read(buffer);
 				}
 				fis.Close();
+#endif
 			}
 			catch (IOException)
 			{
@@ -178,8 +196,12 @@ namespace Couchbase.Lite
 			{
 				try
 				{
+#if PORTABLE
+                    return PCLStorage.FileSystem.Current.LocalStorage.GetFileAsync(path).Result.OpenAsync(PCLStorage.FileAccess.ReadAndWrite).Result;
+#else
                     return new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-				}
+#endif
+                }
 				catch (FileNotFoundException e)
 				{
 					Log.E(Database.Tag, "Unexpected file not found in blob store", e);
@@ -207,8 +229,12 @@ namespace Couchbase.Lite
 					fos.Write(buffer, 0, lenRead);
                     lenRead = ((InputStream)inputStream).Read(buffer);
 				}
-				inputStream.Close();
-				fos.Close();
+#if STORE
+                inputStream.Dispose();
+#else
+                inputStream.Close();
+#endif
+                fos.Close();
 			}
 			catch (IOException e)
 			{
@@ -216,7 +242,7 @@ namespace Couchbase.Lite
 				return false;
 			}
 
-			BlobKey newKey = KeyForBlobFromFile(tmp);
+			BlobKey newKey = KeyForBlobFromFile(tmp.GetPath());
 			outKey.SetBytes(newKey.GetBytes());
 			string path = PathForKey(outKey);
 			FilePath file = new FilePath(path);
@@ -379,13 +405,20 @@ namespace Couchbase.Lite
 			{
 				try
 				{
+#if STORE || SILVERLIGHT
+                    var fileStream = PCLStorage.FileSystem.Current.LocalStorage.GetFileAsync(path).Result.OpenAsync(PCLStorage.FileAccess.ReadAndWrite).Result;
+                    magic = fileStream.ReadByte() & unchecked((0xff)) | ((fileStream.ReadByte() << 8) & unchecked((0xff00)));
+                    fileStream.Dispose();
+#else
+
                     var raf = new RandomAccessFile(file, "r");
                     magic = raf.Read() & unchecked((0xff)) | ((raf.Read() << 8) & unchecked((0xff00)));
 					raf.Close();
+#endif
 				}
 				catch (Exception e)
 				{
-                    Runtime.PrintStackTrace(e, Console.Error);
+                    Log.E(Tag, "Unable to determien whether file is gzipped or not.", e);
 				}
 			}
             return magic == GZIPInputStream.GzipMagic;

@@ -47,12 +47,29 @@ namespace Sharpen
 	using System.Collections.Generic;
 	using System.IO;
 	using System.Threading;
+#if STORE
+    using FileInfo = Windows.Storage.StorageFile;
+#else
+    using FileInfo = System.IO.FileInfo;
+#endif
 
 	internal class FilePath
 	{
+        private static readonly char DirectorySeparatorChar, VolumeSeparatorChar;
+
         private readonly string path;
 		private static long tempCounter;
 
+        static FilePath()
+        {
+#if STORE
+            DirectorySeparatorChar = PCLStorage.PortablePath.DirectorySeparatorChar;
+            VolumeSeparatorChar = PCLStorage.PortablePath.DirectorySeparatorChar;
+#else
+            DirectorySeparatorChar = Path.DirectorySeparatorChar;
+            VolumeSeparatorChar = Path.VolumeSeparatorChar;
+#endif
+        }
 		public FilePath ()
 		{
 		}
@@ -74,11 +91,11 @@ namespace Sharpen
 			if (other == null) {
 				this.path = child;
 			} else {
-                while (!String.IsNullOrEmpty (child) && (child [0] == Path.DirectorySeparatorChar || child [0] == Path.AltDirectorySeparatorChar))
+                while (!String.IsNullOrEmpty (child) && (child [0] == DirectorySeparatorChar))
 					child = child.Substring (1);
 
-				if (!string.IsNullOrEmpty(other) && other[other.Length - 1] == Path.VolumeSeparatorChar)
-					other += Path.DirectorySeparatorChar;
+				if (!string.IsNullOrEmpty(other) && other[other.Length - 1] == VolumeSeparatorChar)
+					other += DirectorySeparatorChar;
 
 				this.path = Path.Combine (other, child);
 			}
@@ -96,12 +113,20 @@ namespace Sharpen
 		
         public static implicit operator FilePath (FileInfo file)
         {
+#if STORE
+            return new FilePath(file.Path);
+#else
             return new FilePath(file.FullName);
+#endif
         }
 
         public static implicit operator FileInfo (FilePath file)
         {
+#if STORE
+            return FileInfo.GetFileFromPathAsync(file.path).GetResults();
+#else
             return new FileInfo(file.path);
+#endif
         }
 
 		public override bool Equals (object obj)
@@ -130,8 +155,12 @@ namespace Sharpen
 		public bool CreateNewFile ()
 		{
 			try {
-                File.Open (path, FileMode.CreateNew).Close ();
-				return true;
+#if STORE
+                PCLStorage.FileSystem.Current.LocalStorage.CreateFileAsync(path, PCLStorage.CreationCollisionOption.FailIfExists).RunSynchronously();
+#else
+                File.Open(path, FileMode.CreateNew).Close();
+#endif
+                return true;
 			} catch {
 				return false;
 			}
@@ -139,8 +168,12 @@ namespace Sharpen
 
 		public static FilePath CreateTempFile ()
 		{
-			return new FilePath (Path.GetTempFileName ());
-		}
+#if STORE
+            return Windows.Storage.ApplicationData.Current.TemporaryFolder.CreateFileAsync(Path.GetRandomFileName(), Windows.Storage.CreationCollisionOption.FailIfExists).GetResults();
+#else
+            return new FilePath(Path.GetTempFileName());
+#endif
+        }
 
 		public static FilePath CreateTempFile (string prefix, string suffix)
 		{
@@ -156,10 +189,18 @@ namespace Sharpen
 			if (prefix.Length < 3) {
 				throw new ArgumentException ("prefix must have at least 3 characters");
 			}
-			string str = (directory == null) ? Path.GetTempPath () : directory.GetPath ();
-			do {
+#if STORE
+            string str = (directory == null) ? Windows.Storage.ApplicationData.Current.TemporaryFolder.Path : directory.GetPath();
+#else
+            string str = (directory == null) ? Path.GetTempPath() : directory.GetPath();
+#endif
+            do {
 				file = Path.Combine (str, prefix + Interlocked.Increment (ref tempCounter) + suffix);
-			} while (File.Exists (file));
+#if STORE
+            } while (PCLStorage.FileSystem.Current.LocalStorage.CheckExistsAsync(file).Result == PCLStorage.ExistenceCheckResult.FileExists);
+#else
+            } while (File.Exists(file));
+#endif
 			
 			new FileOutputStream (file).Close ();
 			return new FilePath (file);
@@ -170,7 +211,7 @@ namespace Sharpen
 			try {
 				return FileHelper.Instance.Delete (this);
 			} catch (Exception exception) {
-				Console.WriteLine (exception);
+				Couchbase.Lite.Util.Log.E ("FilePath", "Failed to delete file " + this.path, exception);
 				return false;
 			}
 		}
@@ -202,7 +243,7 @@ namespace Sharpen
 		public string GetCanonicalPath ()
 		{
 			string p = Path.GetFullPath (path);
-			p.TrimEnd (Path.DirectorySeparatorChar);
+			p.TrimEnd (DirectorySeparatorChar);
 			return p;
 		}
 
@@ -378,11 +419,11 @@ namespace Sharpen
 		}
 
 		static internal char separatorChar {
-			get { return Path.DirectorySeparatorChar; }
+			get { return DirectorySeparatorChar; }
 		}
 
 		static internal string separator {
-			get { return Path.DirectorySeparatorChar.ToString (); }
+			get { return DirectorySeparatorChar.ToString (); }
 		}
 	}
 }

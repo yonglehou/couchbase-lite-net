@@ -47,7 +47,6 @@ using Couchbase.Lite.Util;
 using Couchbase.Lite.Storage;
 using Sharpen;
 using Couchbase.Lite.Internal;
-using System.Data;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using System.Collections;
@@ -644,7 +643,7 @@ namespace Couchbase.Lite {
             }
             sql = sql + " FROM maps, revs, docs WHERE maps.view_id=?";
             var argsList = new AList<string>();
-            argsList.AddItem(Sharpen.Extensions.ToString(Id));
+            argsList.AddItem(Id.ToString());
             if (options.GetKeys() != null)
             {
                 sql += " AND key in (";
@@ -958,7 +957,7 @@ namespace Couchbase.Lite {
             {
                 Database.BeginTransaction();
 
-                var whereArgs = new string[] { Sharpen.Extensions.ToString(Id) };
+                var whereArgs = new string[] { Id.ToString() };
                 Database.StorageEngine.Delete("maps", "view_id=?", whereArgs);
 
                 var updateValues = new ContentValues();

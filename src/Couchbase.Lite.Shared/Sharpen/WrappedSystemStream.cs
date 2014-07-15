@@ -71,7 +71,11 @@ namespace Sharpen
 			get { return ost; }
 		}
 
-		public override void Close ()
+#if !STORE
+        public override void Close ()
+#else
+        public new void Dispose()
+#endif
 		{
 			if (this.ist != null) {
 				this.ist.Close ();

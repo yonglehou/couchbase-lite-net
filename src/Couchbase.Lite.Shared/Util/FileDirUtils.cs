@@ -47,8 +47,54 @@ using Sharpen;
 
 namespace Couchbase.Lite.Util
 {
-	public class FileDirUtils
+	internal class FileDirUtils
 	{
+        // TODO: overload and wrap in ifdef so calling location can avoid having to do that.
+        internal static bool Exists(string path)
+        {
+#if PORTABLE
+            return PCLStorage.FileSystem.Current.LocalStorage.CheckExistsAsync(path.Path).Result == PCLStorage.ExistenceCheckResult.FileExists;
+#else
+            return File.Exists(path.FullName);
+#endif
+        }
+
+#if PORTABLE
+        internal static void CopyFolder(string sourcePath, string destinationPath)
+        {            
+            var sourceDirectory = PCLStorage.FileSystem.Current.GetFolderFromPathAsync(Path.GetDirectoryName(sourcePath)).Result;
+            
+            if (sourceDirectory != null)
+            {
+                var destPath = Path.Combine(Path.GetDirectoryName(destinationPath), Path.GetFileName(sourceDirectory.n));
+                var destinationDirectory = PCLStorage.FileSystem.Current.GetFolderFromPathAsync(destPath).Result;
+
+                //if directory not exists, create it
+                if (destinationDirectory == null)
+                {
+                    destinationDirectory = PCLStorage.FileSystem.Current.LocalStorage.CreateFolderAsync(sourceDirectory.Path, PCLStorage.CreationCollisionOption.FailIfExists).Result;
+                }
+                //list all the directory contents
+                
+                var fileInfos = sourceDirectory.GetFilesAsync().Result;
+                foreach (var fileInfo in fileInfos)
+                {
+                    //construct the src and dest file structure
+                    //recursive copy
+                    CopyFolder(fileInfo.Path, destinationDirectory.Path);
+                }
+            }
+            else
+            {
+                CopyFile((FileInfo)sourcePath, (FileInfo)destinationPath);
+            }
+        }
+
+        private static void CopyFile(FileInfo fileInfo1, FileInfo fileInfo2)
+        {
+            throw new System.NotImplementedException();
+        }
+#endif
         public static string GetDatabaseNameFromPath(string path)
         {
             int lastSlashPos = path.LastIndexOf("/");
@@ -68,43 +114,43 @@ namespace Couchbase.Lite.Util
 		}
 
 		/// <exception cref="System.IO.IOException"></exception>
-        public static void CopyFile(FileInfo sourceFile, FileInfo destFile)
-		{
-            if (!File.Exists(destFile.FullName))
-			{
-                File.Open (destFile.FullName, FileMode.CreateNew).Close ();
-			}
+        //public static void CopyFile(FileInfo sourceFile, FileInfo destFile)
+        //{
+        //    if (!File.Exists(destFile.FullName))
+        //    {
+        //        File.Open (destFile.FullName, FileMode.CreateNew).Close ();
+        //    }
 
-            sourceFile.CopyTo(destFile.FullName);
-		}
+        //    sourceFile.CopyTo(destFile.FullName);
+        //}
 
-		/// <exception cref="System.IO.IOException"></exception>
-        public static void CopyFolder(FileSystemInfo sourcePath, FileSystemInfo destinationPath)
-		{
-            var sourceDirectory = sourcePath as DirectoryInfo;
-            if (sourceDirectory != null)
-			{
-                var destPath = Path.Combine(Path.GetDirectoryName(destinationPath.FullName), Path.GetFileName(sourceDirectory.Name));
-                var destinationDirectory = new DirectoryInfo(destPath);
+        ///// <exception cref="System.IO.IOException"></exception>
+        //public static void CopyFolder(FileSystemInfo sourcePath, FileSystemInfo destinationPath)
+        //{
+        //    var sourceDirectory = sourcePath as DirectoryInfo;
+        //    if (sourceDirectory != null)
+        //    {
+        //        var destPath = Path.Combine(Path.GetDirectoryName(destinationPath.FullName), Path.GetFileName(sourceDirectory.Name));
+        //        var destinationDirectory = new DirectoryInfo(destPath);
 
-				//if directory not exists, create it
-                if (!destinationDirectory.Exists)
-				{
-                    destinationDirectory.Create();
-				}
-				//list all the directory contents
-                var fileInfos = sourceDirectory.EnumerateFileSystemInfos();
-                foreach (var fileInfo in fileInfos)
-				{
-					//construct the src and dest file structure
-					//recursive copy
-                    CopyFolder(fileInfo, destinationDirectory);
-				}
-			}
-			else
-			{
-                CopyFile((FileInfo)sourcePath, (FileInfo)destinationPath);
-			}
-		}
-	}
+        //        //if directory not exists, create it
+        //        if (!destinationDirectory.Exists)
+        //        {
+        //            destinationDirectory.Create();
+        //        }
+        //        //list all the directory contents
+        //        var fileInfos = sourceDirectory.EnumerateFileSystemInfos();
+        //        foreach (var fileInfo in fileInfos)
+        //        {
+        //            //construct the src and dest file structure
+        //            //recursive copy
+        //            CopyFolder(fileInfo, destinationDirectory);
+        //        }
+        //    }
+        //    else
+        //    {
+        //        CopyFile((FileInfo)sourcePath, (FileInfo)destinationPath);
+        //    }
+        //}
+    }
 }

@@ -170,8 +170,12 @@ namespace Couchbase.Lite.Auth
 					}
                     origin = originURL.ToString().ToLower();
 				}
-				catch (UriFormatException e)
-				{
+#if STORE
+                catch (ArgumentOutOfRangeException e)
+#else
+                catch (UriFormatException e)
+#endif
+                {
 					string message = "Error registering assertion: " + assertion;
 					Log.E(Database.Tag, message, e);
 					throw new ArgumentException(message, e);
@@ -235,7 +239,7 @@ namespace Couchbase.Lite.Auth
 
                 var expObject = (long)component3Json.Get("exp");
 				Log.D(Database.Tag, "PersonaAuthorizer exp: " + expObject + " class: " + expObject.GetType());
-                var expDate = Sharpen.Extensions.CreateDate(expObject);
+                var expDate = expObject.CreateDate();
 				result[AssertionFieldExpiration] = expDate;
 			}
 			catch (IOException e)

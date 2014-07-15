@@ -41,6 +41,7 @@
 * either express or implied. See the License for the specific language governing permissions
 * and limitations under the License.
 */
+#if !SILVERLIGHT && !STORE
 namespace Sharpen
 {
 	using System;
@@ -67,10 +68,10 @@ namespace Sharpen
 			stream.Close ();
 		}
 
-		public FileChannel GetChannel ()
-		{
-			return new FileChannel (this.stream);
-		}
+        //public FileChannel GetChannel ()
+        //{
+        //    return new FileChannel (this.stream);
+        //}
 
 		public long GetFilePointer ()
 		{
@@ -136,3 +137,4 @@ namespace Sharpen
 		}
 	}
 }
+#endif

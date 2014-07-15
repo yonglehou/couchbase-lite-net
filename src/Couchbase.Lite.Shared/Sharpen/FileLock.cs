@@ -41,23 +41,23 @@
 * either express or implied. See the License for the specific language governing permissions
 * and limitations under the License.
 */
-namespace Sharpen
-{
-	using System;
-	using System.IO;
+//namespace Sharpen
+//{
+//    using System;
+//    using System.IO;
 
-	internal class FileLock
-	{
-		private FileStream s;
+//    internal class FileLock
+//    {
+//        private FileStream s;
 
-		public FileLock (FileStream s)
-		{
-			this.s = s;
-		}
+//        public FileLock (FileStream s)
+//        {
+//            this.s = s;
+//        }
 
-		public void Release ()
-		{
-			this.s.Unlock (0, int.MaxValue);
-		}
-	}
-}
+//        public void Release ()
+//        {
+//            this.s.Unlock (0, int.MaxValue);
+//        }
+//    }
+//}

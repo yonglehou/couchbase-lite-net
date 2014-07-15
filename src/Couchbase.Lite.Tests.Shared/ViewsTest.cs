@@ -893,7 +893,7 @@ namespace Couchbase.Lite
             foreach (object key in testKeys)
             {
                 IDictionary<string, object> docProperties = new Dictionary<string, object>();
-                docProperties.Put("_id", Sharpen.Extensions.ToString(i++));
+                docProperties.Put("_id", (i++).ToString());
                 docProperties["name"] = key;
                 PutDoc(database, docProperties);
             }
@@ -962,8 +962,8 @@ namespace Couchbase.Lite
             int i = 0;
             foreach (object key in testKeys)
             {
-                IDictionary<string, object> docProperties = new Dictionary<string, object>();
-                docProperties.Put("_id", Sharpen.Extensions.ToString(i++));
+                var docProperties = new Dictionary<string, object>();
+                docProperties.Put("_id", (i++).ToString());
                 docProperties["name"] = key;
                 PutDoc(database, docProperties);
             }
@@ -976,7 +976,7 @@ namespace Couchbase.Lite
 
             QueryOptions options = new QueryOptions();
 
-            IList<QueryRow> rows = view.QueryWithOptions(options).ToList();
+            var rows = view.QueryWithOptions(options).ToList();
 
             i = 0;
             foreach (QueryRow row in rows)

@@ -44,7 +44,6 @@
 using System.Reflection;
 using System.Net;
 using System.Linq;
-using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Specialized;
 
@@ -111,10 +110,10 @@ namespace Sharpen
 			return sb.ToString ().IndexOf (str);
 		}
 
-		public static Iterable<T> AsIterable<T> (this IEnumerable<T> s)
-		{
-			return new EnumerableWrapper<T> (s);
-		}
+        //public static Iterable<T> AsIterable<T> (this IEnumerable<T> s)
+        //{
+        //    return new EnumerableWrapper<T> (s);
+        //}
 
 		public static int BitCount (int val)
 		{
@@ -139,10 +138,10 @@ namespace Sharpen
 			return new CultureInfo("en-US");
 		}
 
-		public static string Name (this Encoding e)
-		{
-			return e.BodyName.ToUpper ();
-		}
+        //public static string Name (this Encoding e)
+        //{
+        //    return e.BodyName.ToUpper ();
+        //}
 		
 		public static string Decode (this Encoding e, byte[] chars, int start, int len)
 		{
@@ -337,7 +336,7 @@ namespace Sharpen
 
 		public static void InitCause (this Exception ex, Exception cause)
 		{
-			Console.WriteLine (cause);
+			Debug.WriteLine (cause);
 		}
 
         public static bool IsEmpty (this String str)
@@ -384,10 +383,10 @@ namespace Sharpen
 			return col.Last<T> ();
 		}
 
-		public static ListIterator<T> ListIterator<T> (this IList<T> col, int n)
-		{
-			return new ListIterator<T> (col, n);
-		}
+        //public static ListIterator<T> ListIterator<T> (this IList<T> col, int n)
+        //{
+        //    return new ListIterator<T> (col, n);
+        //}
 
 		public static int LowestOneBit (int val)
 		{
@@ -400,13 +399,13 @@ namespace Sharpen
 			return regex2.IsMatch (str);
 		}
 		
-		public static DateTime CreateDate (long milliSecondsSinceEpoch)
+		public static DateTime CreateDate (this long milliSecondsSinceEpoch)
 		{
 			long num = EPOCH_TICKS + (milliSecondsSinceEpoch * 10000);
 			return new DateTime (num);
 		}
 
-		public static DateTimeOffset MillisToDateTimeOffset (long milliSecondsSinceEpoch, long offsetMinutes)
+		public static DateTimeOffset MillisToDateTimeOffset (this long milliSecondsSinceEpoch, long offsetMinutes)
 		{
 			TimeSpan offset = TimeSpan.FromMinutes ((double)offsetMinutes);
 			long num = EPOCH_TICKS + (milliSecondsSinceEpoch * 10000);
@@ -627,10 +626,10 @@ namespace Sharpen
 			return Convert.ToString (val, 16);
 		}
 
-		public static string ToString (object val)
-		{
-			return val.ToString ();
-		}
+        //public static string ToString (object val)
+        //{
+        //    return val.ToString ();
+        //}
 
 		public static string ToString (int val, int bas)
 		{
@@ -676,44 +675,44 @@ namespace Sharpen
 //				return 0;
 //		}
 		
-		public static string GetTestName (object obj)
-		{
-			return GetTestName ();
-		}
+        //public static string GetTestName (object obj)
+        //{
+        //    return GetTestName ();
+        //}
 		
-		public static string GetTestName ()
-		{
-			MethodBase met;
-			int n = 0;
-			do {
-				met = new StackFrame (n).GetMethod ();
-				if (met != null) {
-					foreach (Attribute at in met.GetCustomAttributes (true)) {
-						if (at.GetType().FullName == "NUnit.Framework.TestAttribute") {
-							// Convert back to camel case
-							string name = met.Name;
-							if (char.IsUpper (name[0]))
-								name = char.ToLower (name[0]) + name.Substring (1);
-							return name;
-						}
-					}
-				}
-				n++;
-			} while (met != null);
-			return "";
-		}
+        //public static string GetTestName ()
+        //{
+        //    MethodBase met;
+        //    int n = 0;
+        //    do {
+        //        met = new StackFrame (n).GetMethod ();
+        //        if (met != null) {
+        //            foreach (Attribute at in met.GetCustomAttributes (true)) {
+        //                if (at.GetType().FullName == "NUnit.Framework.TestAttribute") {
+        //                    // Convert back to camel case
+        //                    string name = met.Name;
+        //                    if (char.IsUpper (name[0]))
+        //                        name = char.ToLower (name[0]) + name.Substring (1);
+        //                    return name;
+        //                }
+        //            }
+        //        }
+        //        n++;
+        //    } while (met != null);
+        //    return "";
+        //}
 		
-		public static string GetHostAddress (this IPAddress addr)
-		{
-			return addr.ToString ();
-		}
+        //public static string GetHostAddress (this IPAddress addr)
+        //{
+        //    return addr.ToString ();
+        //}
 		
-		public static IPAddress GetAddressByName (string name)
-		{
-			if (name == "0.0.0.0")
-				return IPAddress.Any;
-			return Dns.GetHostAddresses (name).FirstOrDefault ();
-		}
+        //public static IPAddress GetAddressByName (string name)
+        //{
+        //    if (name == "0.0.0.0")
+        //        return IPAddress.Any;
+        //    return Dns.GetHostAddresses (name).FirstOrDefault ();
+        //}
 		
 		public static string GetImplementationVersion (this System.Reflection.Assembly asm)
 		{
@@ -750,69 +749,69 @@ namespace Sharpen
 			return uri;
 		}
 		
-		public static InputStream GetInputStream (this Socket socket)
-		{
-			return new System.Net.Sockets.NetworkStream (socket);
-		}
+        //public static InputStream GetInputStream (this Socket socket)
+        //{
+        //    return new System.Net.Sockets.NetworkStream (socket);
+        //}
 		
-		public static OutputStream GetOutputStream (this Socket socket)
-		{
-			return new System.Net.Sockets.NetworkStream (socket);
-		}
+        //public static OutputStream GetOutputStream (this Socket socket)
+        //{
+        //    return new System.Net.Sockets.NetworkStream (socket);
+        //}
 		
-		public static int GetLocalPort (this Socket socket)
-		{
-			return ((IPEndPoint)socket.LocalEndPoint).Port;
-		}
+        //public static int GetLocalPort (this Socket socket)
+        //{
+        //    return ((IPEndPoint)socket.LocalEndPoint).Port;
+        //}
 		
-		public static int GetPort (this Socket socket)
-		{
-			return ((IPEndPoint)socket.RemoteEndPoint).Port;
-		}
+        //public static int GetPort (this Socket socket)
+        //{
+        //    return ((IPEndPoint)socket.RemoteEndPoint).Port;
+        //}
 		
-		public static IPAddress GetInetAddress (this Socket socket)
-		{
-			return ((IPEndPoint)socket.RemoteEndPoint).Address;
-		}
+        //public static IPAddress GetInetAddress (this Socket socket)
+        //{
+        //    return ((IPEndPoint)socket.RemoteEndPoint).Address;
+        //}
 		
-		public static void Bind2 (this Socket socket, EndPoint ep)
-		{
-			if (ep == null)
-				socket.Bind (new IPEndPoint (IPAddress.Any, 0));
-			else
-				socket.Bind (ep);
-		}
+        //public static void Bind2 (this Socket socket, EndPoint ep)
+        //{
+        //    if (ep == null)
+        //        socket.Bind (new IPEndPoint (IPAddress.Any, 0));
+        //    else
+        //        socket.Bind (ep);
+        //}
 		
 		
-		public static void Connect (this Socket socket, EndPoint ep, int timeout)
-		{
-			try {
-				IAsyncResult res = socket.BeginConnect (ep,null, null);
-				if (!res.AsyncWaitHandle.WaitOne (timeout > 0 ? timeout : Timeout.Infinite, true))
-					throw new IOException ("Connection timeout");
-			} catch (SocketException se) {
-				throw new IOException (se.Message);
-			}
-		}
+        //public static void Connect (this Socket socket, EndPoint ep, int timeout)
+        //{
+        //    try {
+        //        IAsyncResult res = socket.BeginConnect (ep,null, null);
+        //        if (!res.AsyncWaitHandle.WaitOne (timeout > 0 ? timeout : Timeout.Infinite, true))
+        //            throw new IOException ("Connection timeout");
+        //    } catch (SocketException se) {
+        //        throw new IOException (se.Message);
+        //    }
+        //}
 		
-		public static Socket CreateServerSocket (int port, int backlog, IPAddress addr)
-		{
-			Socket s = new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-			s.Bind (new IPEndPoint (addr, port));
-			return s;
-		}
+        //public static Socket CreateServerSocket (int port, int backlog, IPAddress addr)
+        //{
+        //    Socket s = new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        //    s.Bind (new IPEndPoint (addr, port));
+        //    return s;
+        //}
 		
-		public static Socket CreateSocket (string host, int port)
-		{
-			Socket s = new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-			s.Connect (host, port);
-			return s;
-		}
+        //public static Socket CreateSocket (string host, int port)
+        //{
+        //    Socket s = new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        //    s.Connect (host, port);
+        //    return s;
+        //}
 		
-		public static Socket CreateSocket ()
-		{
-			return new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-		}
+        //public static Socket CreateSocket ()
+        //{
+        //    return new Socket (AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        //}
 		
         //public static bool RemoveElement (this ArrayList list, object elem)
         //{

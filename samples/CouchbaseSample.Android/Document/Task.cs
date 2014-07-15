@@ -81,9 +81,9 @@ namespace CouchbaseSample.Android.Document
 			revision.SetUserProperties(properties);
 			if (image != null)
 			{
-				ByteArrayOutputStream @out = new ByteArrayOutputStream();
+				var @out = new MemoryStream();
 				image.Compress(Bitmap.CompressFormat.Jpeg, 50, @out);
-				ByteArrayInputStream @in = new ByteArrayInputStream(@out.ToByteArray());
+				var @in = new MemoryStream(@out.ToArray());
 				revision.SetAttachment("image", "image/jpg", @in);
 			}
 			revision.Save();
@@ -97,20 +97,19 @@ namespace CouchbaseSample.Android.Document
 			{
 				return;
 			}
-			UnsavedRevision revision = task.CreateRevision();
-			ByteArrayOutputStream @out = new ByteArrayOutputStream();
+			var revision = task.CreateRevision();
+			var @out = new MemoryStream();
 			image.Compress(Bitmap.CompressFormat.Jpeg, 50, @out);
-			ByteArrayInputStream @in = new ByteArrayInputStream(@out.ToByteArray());
+			var @in = new MemoryStream(@out.ToArray());
 			revision.SetAttachment("image", "image/jpg", @in);
 			revision.Save();
 		}
 
 		/// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
-		public static void UpdateCheckedStatus(Couchbase.Lite.Document task, bool @checked
-			)
+		public static void UpdateCheckedStatus(Couchbase.Lite.Document task, bool @checked)
 		{
-			IDictionary<string, object> properties = new Dictionary<string, object>();
-			properties.PutAll(task.GetProperties());
+			var properties = new Dictionary<string, object>();
+			properties.PutAll(task.Properties);
 			properties.Put("checked", @checked);
 			task.PutProperties(properties);
 		}

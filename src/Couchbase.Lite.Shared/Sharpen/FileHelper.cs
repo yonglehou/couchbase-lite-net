@@ -74,7 +74,7 @@ namespace Sharpen
 
 		public virtual bool Delete (FilePath path)
 		{
-			if (Directory.Exists (path)) {
+            if (Directory.Exists (path)) {
 				if (Directory.GetFileSystemEntries (path).Length != 0)
 					return false;
 				MakeDirWritable (path);
@@ -171,7 +171,7 @@ namespace Sharpen
 		public virtual bool SetLastModified(FilePath path, long milis)
 		{
 			try {
-				DateTime utcDateTime = Extensions.MillisToDateTimeOffset(milis, 0L).UtcDateTime;
+                DateTime utcDateTime = milis.MillisToDateTimeOffset(0L).UtcDateTime;
 				if (IsFile(path)) {
 					var info2 = new FileInfo(path);
 					info2.LastWriteTimeUtc = utcDateTime;

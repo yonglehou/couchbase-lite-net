@@ -73,8 +73,12 @@ namespace Sharpen
 		public virtual void Close ()
 		{
 			if (Wrapped != null) {
-				Wrapped.Close ();
-			}
+#if STORE
+                Wrapped.Dispose();
+#else
+                Wrapped.Close();
+#endif
+            }
 		}
 
 		public void Dispose ()

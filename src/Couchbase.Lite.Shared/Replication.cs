@@ -165,7 +165,11 @@ namespace Couchbase.Lite
                     {
                         remoteWithQueryRemoved = new UriBuilder(remote.Scheme, remote.GetHost(), remote.Port, remote.AbsolutePath).Uri;
                     }
+#if STORE
+                    catch (ArgumentOutOfRangeException e)
+#else
                     catch (UriFormatException e)
+#endif
                     {
                         throw new ArgumentException("Invalid URI format.", "remote", e);
                     }
@@ -180,7 +184,11 @@ namespace Couchbase.Lite
                 {
                     RemoteUrl = new UriBuilder(remote.Scheme, remote.GetHost(), remote.Port, remote.AbsolutePath).Uri;
                 }
+#if STORE
+                catch (ArgumentOutOfRangeException e)
+#else
                 catch (UriFormatException e)
+#endif
                 {
                     throw new ArgumentException("Invalid URI format.", "remote", e);
                 }
@@ -791,7 +799,11 @@ namespace Couchbase.Lite
                 var url = new Uri(urlStr);
                 SendAsyncRequest(method, url, body, completionHandler);
             }
+#if STORE
+            catch (ArgumentOutOfRangeException e)
+#else
             catch (UriFormatException e)
+#endif
             {
                 Log.E(Tag, "Malformed URL for async request", e);
                 throw;
@@ -949,7 +961,7 @@ namespace Couchbase.Lite
                         var status = response.StatusCode;
                         if ((Int32)status.GetStatusCode() >= 300)
                         {
-                            Log.E(Tag, "Got error " + Sharpen.Extensions.ToString(status.GetStatusCode()));
+                            Log.E(Tag, "Got error " + status.GetStatusCode().ToString());
                             Log.E(Tag, "Request was for: " + message);
                             Log.E(Tag, "Status reason: " + response.ReasonPhrase);
                             error = new WebException(response.ReasonPhrase);
@@ -1048,7 +1060,11 @@ namespace Couchbase.Lite
                     }
                 }), WorkExecutor.Scheduler);
             }
+#if STORE
+            catch (ArgumentOutOfRangeException e)
+#else
             catch (UriFormatException e)
+#endif
             {
                 Log.E(Tag, "Malformed URL for async request", e);
             }
@@ -1062,7 +1078,11 @@ namespace Couchbase.Lite
                 var urlStr = BuildRelativeURLString(relativePath);
                 url = new Uri(urlStr);
             }
+#if STORE
+            catch (ArgumentOutOfRangeException e)
+#else
             catch (UriFormatException e)
+#endif
             {
                 throw new ArgumentException("Invalid URI format.", e);
             }

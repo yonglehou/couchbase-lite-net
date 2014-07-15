@@ -124,8 +124,9 @@ namespace Sharpen
         public static T[] CopyTo<T> (T[] original, Int64 length)
         {
             var copy = new T[length];
-#if SILVERLIGHT
-            Array.Copy(original, copy, length < original.Length ? length : original.Length);
+#if SILVERLIGHT || STORE
+            var len = Convert.ToInt32(length);
+            Array.Copy(original, copy, len < original.Length ? len : original.Length);
 #else
             Array.Copy(original, copy, length < original.Length ? length : original.LongLength);
 #endif

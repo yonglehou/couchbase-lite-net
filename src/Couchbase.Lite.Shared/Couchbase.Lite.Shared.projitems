@@ -70,15 +70,12 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\BitSet.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\BufferedInputStream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\BufferedOutputStream.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\BufferedReader.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\BufferedWriter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ByteArrayInputStream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ByteArrayOutputStream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ByteBuffer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ByteOrder.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\CRC32.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Callable.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Channels.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\CharBuffer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\CharSequence.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\CharUtils.cs" />
@@ -99,8 +96,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\EnumeratorWrapper.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Exceptions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Executor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ExecutorService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Executors.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Extensions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\FileChannel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\FileHelper.cs" />
@@ -124,10 +119,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\JavaCalendar.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\LinkageError.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\LinkedHashMap.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\LinkedHashSet.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ListIterator.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\MappedByteBuffer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Matcher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\MessageDigest.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\MessageFormat.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ObjectInputStream.cs" />
@@ -135,10 +126,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\OutputStream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\OutputStreamWriter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\PasswordAuthentication.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Pattern.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\PipedInputStream.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\PipedOutputStream.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\PrintWriter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\PrivilegedAction.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Process.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Proxy.cs" />
@@ -151,8 +140,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Runnable.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Runtime.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\SSLContext.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ScheduledExecutorService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ScheduledThreadPoolExecutor.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\SimpleDateFormat.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\SingletonList.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\SoftReference.cs" />
@@ -161,8 +148,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\StringTokenizer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\SynchronizedList.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\Thread.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ThreadFactory.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Sharpen\ThreadPoolExecutor.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\TimeUnit.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\TreeSet.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Sharpen\TrustManager.cs" />

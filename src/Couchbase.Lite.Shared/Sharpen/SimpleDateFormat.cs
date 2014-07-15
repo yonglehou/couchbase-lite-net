@@ -100,7 +100,7 @@ namespace Sharpen
 		
 		public string Format (long date)
 		{
-			return Extensions.MillisToDateTimeOffset (date, (int)GetTimeZone ().BaseUtcOffset.TotalMinutes).DateTime.ToString (format);
+            return date.MillisToDateTimeOffset((int)GetTimeZone().BaseUtcOffset.TotalMinutes).DateTime.ToString(format);
 		}
 	}
 }

@@ -44,7 +44,7 @@ using System;
 
 namespace Couchbase.Lite {
 
-    public class CouchbaseLiteException : ApplicationException {
+    public class CouchbaseLiteException : Exception {
 
         internal StatusCode Code { get; set; }
 

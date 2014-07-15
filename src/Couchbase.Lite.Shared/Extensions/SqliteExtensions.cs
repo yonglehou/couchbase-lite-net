@@ -43,7 +43,7 @@
 using System;
 
 using System.Linq;
-using System.Data;
+//using System.Data;
 using System.Collections;
 using System.Collections.Generic;
 using Couchbase.Lite.Util;

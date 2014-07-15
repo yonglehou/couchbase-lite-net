@@ -642,7 +642,7 @@ namespace Couchbase.Lite
             Assert.IsNull(rev.GetAttachment("index.html"));
 
 			var content = "This is a test attachment!";
-            var body = new ByteArrayInputStream(Runtime.GetBytesForString(content).ToArray());
+            var body = new MemoryStream(Runtime.GetBytesForString(content).ToArray());
 
 			var rev2 = doc.CreateRevision();
             rev2.SetAttachment("index.html", "text/plain; charset=utf-8", body);

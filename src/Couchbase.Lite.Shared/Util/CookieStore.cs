@@ -49,6 +49,8 @@ using System.Globalization;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Text.RegularExpressions;
+#elif STORE
+using DirectoryInfo = Windows.Storage.StorageFolder;
 #endif
 using System.IO;
 using System.Reflection;
@@ -181,8 +183,7 @@ namespace Couchbase.Lite.Util
                 return;
             }
 
-            var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists)
+            if (!File.Exists(filePath))
             {
                 return;
             }

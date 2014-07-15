@@ -54,15 +54,23 @@ namespace Sharpen
 
 		public FileInputStream (string file)
 		{
+#if PORTABLE
+            if (PCLStorage.FileSystem.Current.LocalStorage.CheckExistsAsync(file).Result != PCLStorage.ExistenceCheckResult.FileExists) {
+#else
 			if (!File.Exists (file)) {
-				throw new FileNotFoundException ("File not found", file);
+#endif
+                throw new FileNotFoundException ("File not found", file);
 			}
-            base.Wrapped = new FileStream (file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-		}
+#if PORTABLE
+            base.Wrapped = PCLStorage.FileSystem.Current.LocalStorage.GetFileAsync(file).Result.OpenAsync(PCLStorage.FileAccess.ReadAndWrite).Result;
+#else
+            base.Wrapped = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+#endif
+        }
 
-		public FileChannel GetChannel ()
-		{
-			return new FileChannel ((FileStream)base.Wrapped);
-		}
+        //public FileChannel GetChannel ()
+        //{
+        //    return new FileChannel ((FileStream)base.Wrapped);
+        //}
 	}
 }

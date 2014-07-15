@@ -54,7 +54,7 @@ using Trace = System.Diagnostics.Debug;
 namespace Couchbase.Lite.Util
 {
 
-#if SILVERLIGHT
+#if SILVERLIGHT || STORE
     public class TraceShim
     {
         public void WriteLine(string message)
@@ -76,14 +76,14 @@ namespace Couchbase.Lite.Util
 
 	public class SystemLogger : ILogger
 	{
-#if SILVERLIGHT
+#if SILVERLIGHT || STORE
         TraceShim Trace = new TraceShim();
 #endif
 		public virtual void V(string tag, string msg)
 		{
             try {
                 Trace.WriteLine(tag + ": " + msg);
-#if SILVERLIGHT
+#if SILVERLIGHT || STORE
             } catch (Exception) {
 #else
             } catch (ThreadInterruptedException) {
@@ -144,14 +144,9 @@ namespace Couchbase.Lite.Util
 
 		private static string GetStackTraceString(Exception tr)
 		{
-			if (tr == null)
-			{
-                return new System.Diagnostics.StackTrace().ToString();
-            }
-			var stringWriter = new StringWriter();
-			var printWriter = new PrintWriter(stringWriter);
-            Runtime.PrintStackTrace(tr, printWriter);
-			return stringWriter.ToString();
-		}
+            return tr != null 
+                ? tr.StackTrace 
+                : string.Empty;
+        }
 	}
 }

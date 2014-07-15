@@ -55,7 +55,10 @@ using System.Text.RegularExpressions;
 using System.Collections.ObjectModel;
 using Couchbase.Lite.Replicator;
 using Couchbase.Lite.Support;
-
+#if STORE
+using FileInfo = Windows.Storage.StorageFile;
+using DirectoryInfo = Windows.Storage.StorageFolder;
+#endif
 namespace Couchbase.Lite
 {
     /// <summary>
@@ -121,10 +124,13 @@ namespace Couchbase.Lite
             DefaultOptions = ManagerOptions.Default;
 #if SILVERLIGHT
             var path = Environment.SpecialFolder.ApplicationData;
+            defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(path));
+#elif STORE
+            defaultDirectory = Windows.Storage.ApplicationData.Current.LocalFolder;
 #else
             var path = Environment.SpecialFolder.LocalApplicationData;
-#endif
             defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(path));
+#endif
             sharedManager = new Manager(defaultDirectory, ManagerOptions.Default);
         }
 
@@ -149,7 +155,7 @@ namespace Couchbase.Lite
             this.replications = new AList<Replication>();
 
             //create the directory, but don't fail if it already exists
-            if (!directoryFile.Exists)
+            if (!FileDirUtils.Exists(directoryFile))
             {
                 directoryFile.Create();
                 directoryFile.Refresh();
@@ -277,8 +283,8 @@ namespace Couchbase.Lite
                 var sourceFile = databaseFile;
                 var destFile = new FileInfo (database.Path);
                 
-                //FileDirUtils.CopyFile(sourceFile, destFile);
-                File.Copy (sourceFile.FullName, destFile.FullName);
+                FileDirUtils.CopyFile(sourceFile, destFile);
+                //File.Copy (sourceFile.FullName, destFile.FullName);
                 
                 var dstAttachmentsDirectory = new DirectoryInfo (dstAttachmentsPath);
                 //FileDirUtils.DeleteRecursive(attachmentsFile);

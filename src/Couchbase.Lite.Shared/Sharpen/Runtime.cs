@@ -117,10 +117,10 @@ namespace Sharpen
         //    return dictionary;
         //}
 
-		internal static IPAddress GetLocalHost ()
-		{
-			return Dns.GetHostEntry (Dns.GetHostName ()).AddressList[0];
-		}
+        //internal static IPAddress GetLocalHost ()
+        //{
+        //    return Dns.GetHostEntry (Dns.GetHostName ()).AddressList[0];
+        //}
 
         static IDictionary<string, string> properties;
 
@@ -132,16 +132,22 @@ namespace Sharpen
                 properties = new Dictionary<string, string>();
 #if SILVERLIGHT
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData).Trim();
+#elif STORE
+                var home = Windows.Storage.ApplicationData.Current.LocalFolder.Path;
 #else
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).Trim();
-#endif
                 if (string.IsNullOrEmpty (home))
 					home = Environment.GetFolderPath (Environment.SpecialFolder.Personal).Trim ();
-				properties ["user.home"] = home;
+#endif
+                properties ["user.home"] = home;
+#if !SILVERLIGHT && !STORE
 				if (Path.DirectorySeparatorChar != '\\')
 					properties ["os.name"] = "Unix";
 				else
 					properties ["os.name"] = "Windows";
+#else
+                properties["os.name"] = "Windows";
+#endif
 			}
 			return properties;
 		}

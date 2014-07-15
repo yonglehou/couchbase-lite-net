@@ -44,7 +44,7 @@ using Couchbase.Lite.Storage;
 using System.Threading;
 using SQLitePCL;
 using Couchbase.Lite.Util;
-using System.Data;
+//using System.Data;
 using System.Diagnostics;
 using System.Text;
 using System.Collections.Generic;

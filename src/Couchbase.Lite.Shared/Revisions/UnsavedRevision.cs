@@ -305,7 +305,11 @@ namespace Couchbase.Lite
                 var inputStream = contentUrl.OpenConnection().GetInputStream();
                 var length = inputStream.Length;
                 var inputBytes = inputStream.ReadAllBytes();
+#if STORE
+                inputStream.Dispose();
+#else
                 inputStream.Close();
+#endif
                 SetAttachment(name, contentType, inputBytes);
             }
             catch (IOException e)
