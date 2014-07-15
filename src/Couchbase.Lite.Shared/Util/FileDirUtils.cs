@@ -55,7 +55,7 @@ namespace Couchbase.Lite.Util
 #if PORTABLE
             return PCLStorage.FileSystem.Current.LocalStorage.CheckExistsAsync(path.Path).Result == PCLStorage.ExistenceCheckResult.FileExists;
 #else
-            return File.Exists(path.FullName);
+            return File.Exists(path);
 #endif
         }
 

@@ -155,7 +155,7 @@ namespace Couchbase.Lite
             this.replications = new AList<Replication>();
 
             //create the directory, but don't fail if it already exists
-            if (!FileDirUtils.Exists(directoryFile))
+            if (!FileDirUtils.Exists(directoryFile.FullName))
             {
                 directoryFile.Create();
                 directoryFile.Refresh();
@@ -283,8 +283,8 @@ namespace Couchbase.Lite
                 var sourceFile = databaseFile;
                 var destFile = new FileInfo (database.Path);
                 
-                FileDirUtils.CopyFile(sourceFile, destFile);
-                //File.Copy (sourceFile.FullName, destFile.FullName);
+                //FileDirUtils.CopyFile(sourceFile, destFile);
+                File.Copy (sourceFile.FullName, destFile.FullName);
                 
                 var dstAttachmentsDirectory = new DirectoryInfo (dstAttachmentsPath);
                 //FileDirUtils.DeleteRecursive(attachmentsFile);
