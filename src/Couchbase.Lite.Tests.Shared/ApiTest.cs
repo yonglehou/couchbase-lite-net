@@ -836,7 +836,7 @@ namespace Couchbase.Lite
         public void TestAsyncViewQuery()
 		{
 			var doneSignal = new CountDownLatch(1);
-            var db = StartDatabase();
+            var db = database; // StartDatabase();
 
 			View view = db.GetView("vu");
             view.SetMap((document, emitter) => emitter (document ["sequence"], null), "1");

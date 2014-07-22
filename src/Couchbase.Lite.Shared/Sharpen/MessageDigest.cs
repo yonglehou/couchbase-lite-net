@@ -79,7 +79,7 @@ namespace Sharpen
                 return new PortableMessageDigest(PCLCrypto.HashAlgorithm.Md5);
 #else
 			case "sha-1":
-                    return new MessageDigest<SHA1CryptoServiceProvider>();
+                    return new MessageDigest<global::System.Security.Cryptography.SHA1Cng>();
 			case "md5":
                     return new MessageDigest<HMACMD5>();
 #endif

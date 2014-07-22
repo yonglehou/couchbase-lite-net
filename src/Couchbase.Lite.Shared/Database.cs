@@ -64,9 +64,6 @@ namespace Couchbase.Lite
     /// </summary>
     public partial class Database 
     {
-
-        Document debugDoc;
-    
     #region Constructors
 
         /// <summary>
@@ -76,7 +73,8 @@ namespace Couchbase.Lite
         /// <param name="manager">Manager.</param>
         internal Database(String path, Manager manager)
         {
-            Debug.Assert((path.StartsWith("/", StringComparison.InvariantCultureIgnoreCase)));
+            var isRooted = System.IO.Path.IsPathRooted(path);
+            Debug.Assert(isRooted);
 
             //path must be absolute
             Path = path;

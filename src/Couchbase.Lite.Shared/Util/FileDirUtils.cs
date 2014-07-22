@@ -86,11 +86,13 @@ namespace Couchbase.Lite.Util
             }
             else
             {
-                CopyFile((FileInfo)sourcePath, (FileInfo)destinationPath);
+                var sourceFile = PCLStorage.FileSystem.Current.GetFileFromPathAsync(sourcePath).Result;
+                var destinationFile = PCLStorage.FileSystem.Current.GetFileFromPathAsync(sourcePath).Result;
+                CopyFile(sourceFile, destinationFile);
             }
         }
 
-        private static void CopyFile(FileInfo fileInfo1, FileInfo fileInfo2)
+        private static void CopyFile(PCLStorage.IFile fileInfo1, PCLStorage.IFile fileInfo2)
         {
             throw new System.NotImplementedException();
         }

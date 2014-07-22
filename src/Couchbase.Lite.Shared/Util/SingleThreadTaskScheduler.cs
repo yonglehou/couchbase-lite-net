@@ -42,20 +42,22 @@ namespace Couchbase.Lite.Util
         { 
 #if SILVERLIGHT
             ThreadPool.QueueUserWorkItem(s =>
+#elif STORE
+            var asyncAction = Windows.System.Threading.ThreadPool.RunAsync(s =>
 #else
             ThreadPool.UnsafeQueueUserWorkItem(s => 
 #endif
-                { 
-                    allowInlining = true; 
-                    try 
-                    { 
-                        while (true) 
-                        { 
-                            Task task; 
-                            if (queue.Count == 0) 
-                            { 
-                                --runningTasks; 
-                                break; 
+                {
+                    allowInlining = true;
+                    try
+                    {
+                        while (true)
+                        {
+                            Task task;
+                            if (queue.Count == 0)
+                            {
+                                --runningTasks;
+                                break;
                             }
 
 #if SILVERLIGHT
@@ -65,27 +67,34 @@ namespace Couchbase.Lite.Util
 #endif
                             var success = TryExecuteTask(task);
                             if (!success && task.Status != TaskStatus.Canceled && task.Status != TaskStatus.RanToCompletion)
-#if SILVERLIGHT
+                                // TODO: Refactor to use Log.D instead.
+#if SILVERLIGHT || STORE
                                 Debug.WriteLine("Scheduled task failed to execute.\r\n{0}", task.Exception.ToString());
 #else
                                 Trace.TraceError("Scheduled task failed to execute.", task.Exception.ToString());
 #endif
-                        } 
+                        }
                     }
                     catch (Exception e)
                     {
-#if SILVERLIGHT
+                        // TODO: Refactor to use Log.D instead.
+#if SILVERLIGHT || STORE
                         Debug.WriteLine("Scheduled task failed to execute.\r\n{0}", e.ToString());
 #else
                         Trace.TraceError("Unhandled exception in runloop", e.ToString());
 #endif
                         throw;
                     }
-                    finally 
+                    finally
                     {
                         allowInlining = false;
-                    } 
-                }, null);
+                    }
+#if !STORE
+                    }, null);
+#else
+                }, Windows.System.Threading.WorkItemPriority.Normal);
+            asyncAction.GetResults();
+#endif
         } 
 
         protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) 

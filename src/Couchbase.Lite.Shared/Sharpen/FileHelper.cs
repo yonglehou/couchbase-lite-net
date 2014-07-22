@@ -108,10 +108,10 @@ namespace Sharpen
 		{
 			if (IsFile(path)) {
 				var info2 = new FileInfo(path);
-				return info2.Exists ? info2.LastWriteTimeUtc.ToMillisecondsSinceEpoch() : 0;
+				return info2.Exists ? info2.LastWriteTime.ToUniversalTime().ToMillisecondsSinceEpoch() : 0;
 			} else if (IsDirectory (path)) {
 				var info = new DirectoryInfo(path);
-				return info.Exists ? info.LastWriteTimeUtc.ToMillisecondsSinceEpoch() : 0;
+                return info.Exists ? info.LastWriteTime.ToUniversalTime().ToMillisecondsSinceEpoch() : 0;
 			}
 			return 0;
 		}
@@ -174,11 +174,11 @@ namespace Sharpen
                 DateTime utcDateTime = milis.MillisToDateTimeOffset(0L).UtcDateTime;
 				if (IsFile(path)) {
 					var info2 = new FileInfo(path);
-					info2.LastWriteTimeUtc = utcDateTime;
+					info2.LastWriteTime = utcDateTime;
 					return true;
 				} else if (IsDirectory(path)) {
 					var info = new DirectoryInfo(path);
-					info.LastWriteTimeUtc = utcDateTime;
+					info.LastWriteTime = utcDateTime;
 					return true;
 				}
 			} catch  {

@@ -98,7 +98,8 @@ namespace Couchbase.Lite.Support
         public IEnumerable<byte> GetBoundaryWithoutLeadingCRLF()
         {
             var rawBoundary = GetBoundary();
-            var result = new ArraySegment<Byte>(rawBoundary, 2, rawBoundary.Length - 2);
+            var result = rawBoundary.Skip(2);
+            //var result = new ArraySegment<Byte>(rawBoundary, 2, rawBoundary.Length - 3);
             return result;
         }
 
@@ -206,7 +207,7 @@ namespace Couchbase.Lite.Support
                             if (bufLen >= boundaryWithoutLeadingCRLF.Length)
                             {
                                 // if (Arrays.equals(buffer.toByteArray(), boundaryWithoutLeadingCRLF)) {
-                                if (Memcmp(buffer.ToArray(), boundaryWithoutLeadingCRLF, boundaryWithoutLeadingCRLF.Length))
+                                if (Memcmp(buffer.ToArray(), boundaryWithoutLeadingCRLF, boundaryWithoutLeadingCRLF.Count()))
                                 {
                                     DeleteUpThrough(boundaryWithoutLeadingCRLF.Length);
                                     nextState = MultipartReader.MultipartReaderState.InHeaders;
@@ -317,7 +318,7 @@ namespace Couchbase.Lite.Support
                             if (tempBoundary.Length < 2 || !tempBoundary.EndsWith ("\"", StringComparison.InvariantCultureIgnoreCase)) {
                                 throw new ArgumentException (contentType + " is not valid");
                             }
-                            tempBoundary = tempBoundary.Substring(1, tempBoundary.Length - 2);
+                            tempBoundary = tempBoundary.Substring(1, tempBoundary.Length - 2); // We are removing both double-quote marks.
                         }
                         if (tempBoundary.Length < 1)
                         {

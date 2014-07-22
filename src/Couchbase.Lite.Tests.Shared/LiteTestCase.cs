@@ -99,7 +99,7 @@ namespace Couchbase.Lite
         protected internal virtual DirectoryInfo GetRootDirectory()
 		{
             var rootDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var rootDirectory = new DirectoryInfo(Path.Combine(rootDirectoryPath, "couchbase/tests/files"));
+            var rootDirectory = new DirectoryInfo(Path.Combine(rootDirectoryPath, @"couchbase\tests\files"));
 			return rootDirectory;
 		}
 
@@ -148,13 +148,14 @@ namespace Couchbase.Lite
 
 		protected internal virtual Database EnsureEmptyDatabase(string dbName)
 		{
-			Database db = manager.GetExistingDatabase(dbName);
+			var db = manager.GetExistingDatabase(dbName);
 			if (db != null)
 			{
                 var status = false;;
 
                 try {
                     db.Delete ();
+                    db.Close();
                     status = true;
                 } catch (Exception e) { 
                     Log.E(Tag, "Cannot delete database " + e.Message);

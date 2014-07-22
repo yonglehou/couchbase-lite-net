@@ -80,6 +80,7 @@ namespace Couchbase.Lite
 		private BufferedOutputStream outStream;
 
 		private FilePath tempFile;
+        private byte[] sha1DigestResult;
 
 		public BlobStoreWriter(BlobStore store)
 		{
@@ -143,8 +144,8 @@ namespace Couchbase.Lite
 				while ((len = inputStream.Read(buffer)) != -1)
 				{
 					outStream.Write(buffer, 0, len);
-					sha1Digest.Update(buffer);
-					md5Digest.Update(buffer);
+					sha1Digest.Update(buffer, 0, len);
+					md5Digest.Update(buffer, 0, len);
 					length += len;
 				}
 			}
@@ -179,6 +180,7 @@ namespace Couchbase.Lite
 			}
 			blobKey = new BlobKey(sha1Digest.Digest());
 			md5DigestResult = md5Digest.Digest();
+            sha1DigestResult = sha1Digest.Digest();
 		}
 
 		/// <summary>Call this to cancel before finishing the data.</summary>
@@ -226,7 +228,7 @@ namespace Couchbase.Lite
 
 		public virtual string SHA1DigestString()
 		{
-            string base64Sha1Digest = Convert.ToBase64String(blobKey.GetBytes());
+            string base64Sha1Digest = Convert.ToBase64String(sha1DigestResult);
             return string.Format("sha1-{0}", base64Sha1Digest);
 		}
 

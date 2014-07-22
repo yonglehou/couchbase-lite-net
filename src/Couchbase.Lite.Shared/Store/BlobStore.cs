@@ -46,7 +46,7 @@ using System.IO;
 using Couchbase.Lite;
 using Couchbase.Lite.Util;
 using Sharpen;
-#if STORE
+#if PORTABLE
 using FileInfo = PCLStorage.IFile;
 #else
 using FileInfo = System.IO.FileInfo;
@@ -424,10 +424,10 @@ namespace Couchbase.Lite
             return magic == GZIPInputStream.GzipMagic;
 		}
 
-        public FileInfo TempDir()
+        public FilePath TempDir()
 		{
-            FilePath directory = new FilePath(path);
-            FilePath tempDirectory = new FilePath(directory, "temp_attachments");
+            var directory = new FilePath(path);
+            var tempDirectory = new FilePath(directory, "temp_attachments");
             tempDirectory.Mkdirs();
             if (!tempDirectory.IsDirectory())
             {

@@ -53,7 +53,7 @@ namespace Sharpen
     using FileInfo = System.IO.FileInfo;
 #endif
 
-	internal class FilePath
+	public class FilePath
 	{
         private static readonly char DirectorySeparatorChar, VolumeSeparatorChar;
 
@@ -292,7 +292,7 @@ namespace Sharpen
 			return List (null);
 		}
 
-		public string[] List (FilenameFilter filter)
+		internal string[] List (FilenameFilter filter)
 		{
 			try {
 				if (IsFile ())

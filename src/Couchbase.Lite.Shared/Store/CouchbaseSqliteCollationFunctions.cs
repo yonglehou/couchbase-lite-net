@@ -59,7 +59,14 @@ namespace Couchbase.Lite.Storage
         /// <param name = "args"></param>
         public static Int32 Compare (object userData, String param1, String param2)
         {
-            return JsonCollator.Compare(JsonCollationMode.Unicode, param1, param2, Int32.MaxValue);
+            try
+            {
+                return JsonCollator.Compare(JsonCollationMode.Unicode, param1, param2, Int32.MaxValue);
+            }
+            catch
+            {                
+                throw;
+            }
         }
     }
 
@@ -77,7 +84,16 @@ namespace Couchbase.Lite.Storage
         /// <param name = "args"></param>
         public static Int32 Compare (object userData, String param1, String param2)
         {
-            return JsonCollator.Compare(JsonCollationMode.Ascii, param1, param2, Int32.MaxValue);
+            try
+            {
+                return JsonCollator.Compare(JsonCollationMode.Ascii, param1, param2, Int32.MaxValue);
+
+            }
+            catch
+            {
+                
+                throw;
+            }
         }
     }
 
@@ -95,7 +111,16 @@ namespace Couchbase.Lite.Storage
         /// <param name = "args"></param>
         public static Int32 Compare (object userData, String param1, String param2)
         {
-            return JsonCollator.Compare(JsonCollationMode.Raw, param1, param2, Int32.MaxValue);
+            try
+            {
+                return JsonCollator.Compare(JsonCollationMode.Raw, param1, param2, Int32.MaxValue);
+
+            }
+            catch (Exception)
+            {
+                
+                throw;
+            }
         }
     }
 
@@ -112,7 +137,16 @@ namespace Couchbase.Lite.Storage
         /// <param name = "args"></param>
         public static Int32 Compare (object userData, String param1, String param2)
         {
-            return RevIdCollator.Compare(param1, param2);
+            try
+            {
+                return RevIdCollator.Compare(param1, param2);
+
+            }
+            catch (Exception)
+            {
+                
+                throw;
+            }
         }
     }
 }
