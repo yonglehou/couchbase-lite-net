@@ -339,11 +339,11 @@ namespace Couchbase.Lite.Replicator
                                 try {
                                     LocalDatabase.LoadRevisionBody (rev, contentOptions);
                                 } catch (CouchbaseLiteException e1) {
-                                    Log.W(Tag, string.Format("{0} Couldn't get local contents of {1}", rev, this));
+                                    Log.E (Tag, string.Format("{0} Couldn't get local contents of {1}", rev, this), e1);
                                     RevisionFailed();
                                     continue;
                                 }
-
+                                
                                 var properties = new Dictionary<String, Object>(rev.GetProperties());
                                 if (properties.ContainsKey ("_attachments")) {
                                     if (UploadMultipartRevision (rev)) {

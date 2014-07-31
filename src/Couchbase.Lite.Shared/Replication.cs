@@ -1104,8 +1104,8 @@ namespace Couchbase.Lite
                         Log.E(Tag, "SendAsyncRequest did not run to completion.", response.Exception);
                         return null;
                     }
-                    if (response.Result.StatusCode != HttpStatusCode.OK) {
-                        SetLastError(new HttpResponseException(response.Result.StatusCode));
+                    if (!response.Result.IsSuccessStatusCode) {
+                        SetLastError(new HttpResponseException(response.Result.StatusCode), "{0:D}: {1}".Fmt(response.Result.StatusCode, response.Result.ReasonPhrase));
                         Log.E(Tag, "Server returned HTTP Error", LastError);
                         return null;
                     }
@@ -1477,10 +1477,10 @@ namespace Couchbase.Lite
             }
         }
 
-        protected void SetLastError(Exception error) {
+        protected void SetLastError(Exception error, String message = null) {
             if (LastError != error)
             {
-                Log.E(Tag, " Progress: set error = ", error);
+                Log.E(Tag + ".SetLastError", message ?? error.ToString(), error);
                 LastError = error;
                 NotifyChangeListeners();
             }
