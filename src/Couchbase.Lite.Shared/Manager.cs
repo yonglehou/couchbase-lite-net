@@ -80,7 +80,8 @@ namespace Couchbase.Lite
 
         internal const string DatabaseSuffix = ".cblite";
 
-        const string IllegalCharacters = "[^a-z]{1,}[^a-z0-9_$()/+-]*$";
+        // FIXME: Not all of these are valid Windows file chars.
+        const string IllegalCharacters = @"(^[^a-z]+)|[^a-z0-9_\$\(\)/\+\-]+";
 
     #endregion
 
@@ -119,7 +120,6 @@ namespace Couchbase.Lite
         static Manager()
         {
             illegalCharactersPattern = new Regex(IllegalCharacters);
-            legalCharactersPattern = new Regex("^[abcdefghijklmnopqrstuvwxyz0123456789_$()+-/]+$");
             mapper = new ObjectWriter();
             DefaultOptions = ManagerOptions.Default;
 #if SILVERLIGHT
@@ -318,7 +318,6 @@ namespace Couchbase.Lite
         private static readonly ObjectWriter mapper;
         private static readonly Manager sharedManager;
         private static readonly DirectoryInfo defaultDirectory;
-        private static readonly Regex legalCharactersPattern;
         private static readonly Regex illegalCharactersPattern;
 
         // Static Methods
@@ -329,7 +328,8 @@ namespace Couchbase.Lite
 
         private static bool ContainsOnlyLegalCharacters(string databaseName)
         {
-            return !illegalCharactersPattern.IsMatch(databaseName);
+            var result = !illegalCharactersPattern.IsMatch(databaseName);
+            return result;
         }
 
         // Instance Fields
