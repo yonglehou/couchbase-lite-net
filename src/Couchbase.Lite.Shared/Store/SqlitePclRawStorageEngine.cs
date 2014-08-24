@@ -65,10 +65,10 @@ namespace Couchbase.Lite.Shared
         private sqlite3 db;
         private Boolean shouldCommit;
 
-        private delegate_collation jsonCompare;
-        private delegate_collation jsonAsciiCompare;
-        private delegate_collation jsonRawCompare;
-        private delegate_collation revIdCompare;
+        private static delegate_collation jsonCompare;
+        private static delegate_collation jsonAsciiCompare;
+        private static delegate_collation jsonRawCompare;
+        private static delegate_collation revIdCompare;
 
         #region implemented abstract members of SQLiteStorageEngine
 
@@ -99,18 +99,8 @@ namespace Couchbase.Lite.Shared
                     val = raw.sqlite3_compileoption_get(++i);
                 }
 #endif
-                this.jsonCompare = CouchbaseSqliteJsonUnicodeCollationFunction.Compare;
-                var c1 = raw.sqlite3_create_collation(db, "JSON", null, jsonCompare);
 
-                this.jsonAsciiCompare = CouchbaseSqliteJsonAsciiCollationFunction.Compare;
-                var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, jsonAsciiCompare);
-
-                this.jsonRawCompare = CouchbaseSqliteJsonRawCollationFunction.Compare;
-                var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, jsonRawCompare);
-
-                this.revIdCompare = CouchbaseSqliteRevIdCollationFunction.Compare;
-                var c4 = raw.sqlite3_create_collation(db, "REVID", null, revIdCompare);
-
+                RegisterCollationFunctions(db);
             } catch (Exception ex) {
                 Log.E(Tag, "Error opening the Sqlite connection using connection String: {0}".Fmt(path), ex);
                 result = false;
@@ -226,7 +216,9 @@ namespace Couchbase.Lite.Shared
 
         public void ExecSQL (String sql, params Object[] paramArgs)
         {
-            lock (dbLock) {
+            RegisterCollationFunctions(db);
+            lock (dbLock)
+            {
                 var command = BuildCommand (sql, paramArgs);
 
                 try {
@@ -244,6 +236,7 @@ namespace Couchbase.Lite.Shared
 
         public Cursor RawQuery(String sql, params Object[] paramArgs)
         {
+            RegisterCollationFunctions(db);
             Cursor cursor = null;
             var command = BuildCommand (sql, paramArgs);
 
@@ -278,18 +271,7 @@ namespace Couchbase.Lite.Shared
                 Log.E(Tag, "Unsupported use of nullColumnHack", e);
                 throw e;
             }
-            this.jsonCompare = CouchbaseSqliteJsonUnicodeCollationFunction.Compare;
-            var c1 = raw.sqlite3_create_collation(db, "JSON", null, jsonCompare);
-
-            this.jsonAsciiCompare = CouchbaseSqliteJsonAsciiCollationFunction.Compare;
-            var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, jsonAsciiCompare);
-
-            this.jsonRawCompare = CouchbaseSqliteJsonRawCollationFunction.Compare;
-            var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, jsonRawCompare);
-
-            this.revIdCompare = CouchbaseSqliteRevIdCollationFunction.Compare;
-            var c4 = raw.sqlite3_create_collation(db, "REVID", null, revIdCompare);
-
+            RegisterCollationFunctions(db);
             var lastInsertedId = -1L;
             var command = GetInsertCommand(table, initialValues, conflictResolutionStrategy);
 
@@ -330,12 +312,29 @@ namespace Couchbase.Lite.Shared
 
             return lastInsertedId;
         }
+        [Conditional("MSFT")]
+        internal static void RegisterCollationFunctions(sqlite3 db)
+        {
+            SqlitePCLRawStorageEngine.jsonCompare = CouchbaseSqliteJsonUnicodeCollationFunction.Compare;
+            var c1 = raw.sqlite3_create_collation(db, "JSON", null, jsonCompare);
+
+            SqlitePCLRawStorageEngine.jsonAsciiCompare = CouchbaseSqliteJsonAsciiCollationFunction.Compare;
+            var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, jsonAsciiCompare);
+
+            SqlitePCLRawStorageEngine.jsonRawCompare = CouchbaseSqliteJsonRawCollationFunction.Compare;
+            var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, jsonRawCompare);
+
+            SqlitePCLRawStorageEngine.revIdCompare = CouchbaseSqliteRevIdCollationFunction.Compare;
+            var c4 = raw.sqlite3_create_collation(db, "REVID", null, revIdCompare);
+
+        }
 
         public int Update (String table, ContentValues values, String whereClause, params String[] whereArgs)
         {
             Debug.Assert(!String.IsNullOrWhiteSpace(table));
             Debug.Assert(values != null);
 
+            RegisterCollationFunctions(db);
             var resultCount = 0;
             lock (dbLock) {
                 var command = GetUpdateCommand(table, values, whereClause, whereArgs);
@@ -363,6 +362,7 @@ namespace Couchbase.Lite.Shared
         public int Delete (String table, String whereClause, params String[] whereArgs)
         {
             Debug.Assert(!String.IsNullOrWhiteSpace(table));
+            RegisterCollationFunctions(db);
 
             var resultCount = -1;
             lock (dbLock) {

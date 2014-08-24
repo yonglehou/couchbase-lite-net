@@ -94,7 +94,7 @@ namespace Couchbase.Lite
         /// </summary>
         /// <value>The shared instance.</value>
         // FIXME: SharedInstance lifecycle is undefined, so returning default manager for now.
-        public static Manager SharedInstance { get { return sharedManager; } }
+        public static Manager SharedInstance { get { return sharedManager ?? (sharedManager = new Manager(defaultDirectory, ManagerOptions.Default);); } }
 
         //Methods
 
@@ -131,7 +131,6 @@ namespace Couchbase.Lite
             var path = Environment.SpecialFolder.LocalApplicationData;
             defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(path));
 #endif
-            sharedManager = new Manager(defaultDirectory, ManagerOptions.Default);
         }
 
         /// <summary>
@@ -316,7 +315,7 @@ namespace Couchbase.Lite
 
         // Static Fields
         private static readonly ObjectWriter mapper;
-        private static readonly Manager sharedManager;
+        private static          Manager sharedManager;
         private static readonly DirectoryInfo defaultDirectory;
         private static readonly Regex illegalCharactersPattern;
 

@@ -99,8 +99,8 @@ namespace Couchbase.Lite.Util
 
         protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) 
         { 
-            if (!allowInlining)
-                return false; 
+//            if (!allowInlining)
+//                return false; 
 
             if (taskWasPreviouslyQueued)
                 TryDequeue(task); 

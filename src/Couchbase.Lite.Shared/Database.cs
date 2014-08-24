@@ -3991,6 +3991,7 @@ PRAGMA user_version = 3;";
             if (StorageEngine != null && StorageEngine.IsOpen)
             {
                 StorageEngine.Close();
+                StorageEngine = null;
             }
             open = false;
             transactionLevel = 0;

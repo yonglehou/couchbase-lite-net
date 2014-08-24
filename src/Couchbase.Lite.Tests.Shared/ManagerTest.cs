@@ -94,13 +94,13 @@ namespace Couchbase.Lite
             var testDirInfo = Directory.CreateDirectory(testDirPath);
 
             var oldTouchDb = Path.Combine(testDirPath, "old" + Manager.DatabaseSuffixOld);
-            File.Create(oldTouchDb);
+            File.Create(oldTouchDb).Dispose();
 
             var newCbLiteDb = Path.Combine(testDirPath, "new" + Manager.DatabaseSuffix);
-            File.Create(newCbLiteDb);
+            File.Create(newCbLiteDb).Dispose();
 
             var migratedOldFile = Path.Combine(testDirPath, "old" + Manager.DatabaseSuffix);
-            File.Create(migratedOldFile);
+            File.Create(migratedOldFile).Dispose();
 
 			StopCBLite();
             manager = new Manager(testDirInfo, Manager.DefaultOptions);
