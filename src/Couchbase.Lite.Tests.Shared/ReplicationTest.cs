@@ -775,13 +775,16 @@ namespace Couchbase.Lite.Replicator
 
             var foundRevsDiff = false;
             var capturedRequests = httpHandler.GetCapturedRequests();
+            var capturedContents = httpHandler.GetCapturedContents();
+
             foreach (var httpRequest in capturedRequests) 
             {
                 var uriString = httpRequest.RequestUri.ToString();
                 if (uriString.EndsWith("_revs_diff"))
                 {
                     foundRevsDiff = true;
-                    var jsonMap = MockHttpRequestHandler.GetJsonMapFromRequest(httpRequest);
+                    var content = capturedContents[httpRequest];
+                    var jsonMap = MockHttpRequestHandler.GetJsonMapFromRequest(content);
                     var revisionIds = ((JArray)jsonMap.Get(doc.Id)).Values<string>().ToList();
                     Assert.AreEqual(2, revisionIds.Count);
                     Assert.IsTrue(revisionIds.Contains(rev4a.Id));

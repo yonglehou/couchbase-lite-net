@@ -74,9 +74,14 @@ namespace Couchbase.Lite.Util
 
         public CookieStore(DirectoryInfo directory) 
         {
+            // FIXME: Don't rely on private API details. Temporary workaround for now.
+#if !MSFT
             cookiesField = typeof(CookieContainer)
                 .GetField("cookies", (BindingFlags.GetField | BindingFlags.Instance | BindingFlags.NonPublic));
-
+#else
+            cookiesField = typeof(CookieContainer)
+                .GetField("m_domainTable", (BindingFlags.GetField | BindingFlags.Instance | BindingFlags.NonPublic));
+#endif
             this.directory = directory;
 
             DeserializeFromDisk();

@@ -66,6 +66,7 @@ namespace Couchbase.Lite.Tests
         {
             responders = new Dictionary<string, HttpResponseDelegate>();
             CapturedRequests = new List<HttpRequestMessage>();
+            CapturedContents = new Dictionary<HttpRequestMessage, Byte[]>();
             AddDefaultResponders();
         }
 
@@ -82,7 +83,10 @@ namespace Couchbase.Lite.Tests
                 Delay();
 
                 CapturedRequests.Add(request);
-
+                if (request.Content != null)
+                {
+                    CapturedContents.Add(request ,request.Content.ReadAsByteArrayAsync().Result);
+                }
                 foreach(var urlPattern in responders.Keys)
                 {
                     if (urlPattern.Equals("*") || request.RequestUri.PathAndQuery.Contains(urlPattern))
@@ -109,8 +113,20 @@ namespace Couchbase.Lite.Tests
             return snapshot;
         }
 
-        public void ClearCapturedRequests() {
+        public IDictionary<HttpRequestMessage, Byte[]> GetCapturedContents()
+        {
+            var snapshot = new Dictionary<HttpRequestMessage, Byte[]>(CapturedContents);
+            return snapshot;
+        }
+
+        public void ClearCapturedRequests()
+        {
             CapturedRequests.Clear();
+        }
+
+        public void ClearCapturedContents()
+        {
+            CapturedContents.Clear();
         }
 
         public void AddDefaultResponders()
@@ -184,6 +200,7 @@ namespace Couchbase.Lite.Tests
         private IDictionary <string, HttpResponseDelegate> responders;
 
         internal IList <HttpRequestMessage> CapturedRequests;
+        internal IDictionary<HttpRequestMessage, Byte[]> CapturedContents;
 
         private void Delay()
         {
@@ -202,11 +219,10 @@ namespace Couchbase.Lite.Tests
 
         #region Static Members
 
-        public static IDictionary<string, object> GetJsonMapFromRequest(HttpRequestMessage request)
+        public static IDictionary<string, object> GetJsonMapFromRequest(Byte[] request)
         {
-            var bytesTask = request.Content.ReadAsByteArrayAsync();
-            bytesTask.Wait(TimeSpan.FromSeconds(3));
-            var value = Manager.GetObjectMapper().ReadValue<object>(bytesTask.Result);
+            //var bytesTask = request.Content.ReadAsByteArrayAsync();
+            var value = Manager.GetObjectMapper().ReadValue<object>(request);
 
             IDictionary<string, object> jsonMap = null;
             if (value is JObject)
@@ -268,7 +284,7 @@ namespace Couchbase.Lite.Tests
 
         public static HttpResponseMessage FakeBulkDocs(HttpRequestMessage request)
         {
-            var jsonMap = GetJsonMapFromRequest(request);
+            var jsonMap = GetJsonMapFromRequest(request.Content.ReadAsByteArrayAsync().Result);
             var responseList = new List<IDictionary<string, object>>();
 
             var docs = ((JArray)jsonMap["docs"]).ToList();
@@ -320,7 +336,7 @@ namespace Couchbase.Lite.Tests
         /// <param name="httpUriRequest">Http URI request.</param>
         public static HttpResponseMessage FakeRevsDiff(HttpRequestMessage request)
         {
-            IDictionary<string, object> jsonMap = GetJsonMapFromRequest(request);
+            IDictionary<string, object> jsonMap = GetJsonMapFromRequest(request.Content.ReadAsByteArrayAsync().Result);
             IDictionary<string, object> responseMap = new Dictionary<string, object>();
             foreach (string key in jsonMap.Keys)
             {
