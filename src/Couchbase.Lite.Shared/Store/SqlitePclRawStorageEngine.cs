@@ -65,11 +65,6 @@ namespace Couchbase.Lite.Shared
         private sqlite3 db;
         private Boolean shouldCommit;
 
-        private static delegate_collation jsonCompare;
-        private static delegate_collation jsonAsciiCompare;
-        private static delegate_collation jsonRawCompare;
-        private static delegate_collation revIdCompare;
-
         #region implemented abstract members of SQLiteStorageEngine
 
         public bool Open (String path)
@@ -315,17 +310,13 @@ namespace Couchbase.Lite.Shared
         [Conditional("MSFT")]
         internal static void RegisterCollationFunctions(sqlite3 db)
         {
-            SqlitePCLRawStorageEngine.jsonCompare = CouchbaseSqliteJsonUnicodeCollationFunction.Compare;
-            var c1 = raw.sqlite3_create_collation(db, "JSON", null, jsonCompare);
+            var c1 = raw.sqlite3_create_collation(db, "JSON", null, CouchbaseSqliteJsonUnicodeCollationFunction.Compare);
 
-            SqlitePCLRawStorageEngine.jsonAsciiCompare = CouchbaseSqliteJsonAsciiCollationFunction.Compare;
-            var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, jsonAsciiCompare);
+            var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, CouchbaseSqliteJsonAsciiCollationFunction.Compare);
 
-            SqlitePCLRawStorageEngine.jsonRawCompare = CouchbaseSqliteJsonRawCollationFunction.Compare;
-            var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, jsonRawCompare);
+            var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, CouchbaseSqliteJsonRawCollationFunction.Compare);
 
-            SqlitePCLRawStorageEngine.revIdCompare = CouchbaseSqliteRevIdCollationFunction.Compare;
-            var c4 = raw.sqlite3_create_collation(db, "REVID", null, revIdCompare);
+            var c4 = raw.sqlite3_create_collation(db, "REVID", null, CouchbaseSqliteRevIdCollationFunction.Compare);
 
         }
 
