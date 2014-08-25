@@ -94,7 +94,7 @@ namespace Couchbase.Lite
             // Workaround :
             // Not closing the content stream will cause Sharing Violation
             // Exception when trying to get the same attachment going forward.
-            attachment.ContentStream.Close();
+            attachment.Dispose();
 
             var innerDict = new Dictionary<string, object>();
 			innerDict["content_type"] = "text/plain";
@@ -177,7 +177,7 @@ namespace Couchbase.Lite
             // Workaround :
             // Not closing the content stream will cause Sharing Violation
             // Exception when trying to get the same attachment going forward.
-            attachment2.ContentStream.Close();
+            attachment2.Dispose();
 
 			// Check the 3rd revision's attachment:
             Attachment attachment3 = database.GetAttachmentForSequence(rev3.GetSequence(), testAttachmentName);
@@ -188,7 +188,7 @@ namespace Couchbase.Lite
             // Workaround :
             // Not closing the content stream will cause Sharing Violation
             // Exception when trying to get the same attachment going forward.
-            attachment3.ContentStream.Close();
+            attachment3.Dispose();
 
 			// Examine the attachment store:
 			Assert.AreEqual(2, attachments.Count());
@@ -261,10 +261,7 @@ namespace Couchbase.Lite
 				throw new RuntimeException("Expected attachment dict to have 'follows' key");
 			}
 
-            // Workaround :
-            // Not closing the content stream will cause Sharing Violation
-            // Exception when trying to get the same attachment going forward.
-            attachment.ContentStream.Close();
+            attachment.Dispose();
 
             var rev1WithAttachments = database.GetDocumentWithIDAndRev(
                 rev1.GetDocId(), rev1.GetRevId(), contentOptions);
@@ -285,6 +282,7 @@ namespace Couchbase.Lite
             Assert.AreEqual(attachment.Length, rev2FetchedAttachment.Length);
             AssertPropertiesAreEqual(attachment.Metadata, rev2FetchedAttachment.Metadata);
             Assert.AreEqual(attachment.ContentType, rev2FetchedAttachment.ContentType);
+            rev2FetchedAttachment.Dispose();
 
 			// Add a third revision of the same document:
             var rev3Properties = new Dictionary<string, object>();
@@ -306,6 +304,7 @@ namespace Couchbase.Lite
             data = rev3FetchedAttachment.Content.ToArray();
 			Assert.IsTrue(Arrays.Equals(attach3, data));
             Assert.AreEqual("text/html", rev3FetchedAttachment.ContentType);
+            rev3FetchedAttachment.Dispose();
 
 			// TODO: why doesn't this work?
 			// Assert.assertEquals(attach3.length, rev3FetchedAttachment.getLength());
@@ -457,8 +456,8 @@ namespace Couchbase.Lite
 			blobWriter.Finish();
 
             var sha1Base64Digest = "sha1-C+7Hteo/D9vJXQ3UfzxbwnXaijM=";
-			Assert.AreEqual(blobWriter.SHA1DigestString(), sha1Base64Digest);
-			Assert.AreEqual(blobWriter.MD5DigestString(), "md5-rL0Y20zC+Fzt72VPzMSk2A==");
+            Assert.AreEqual(sha1Base64Digest, blobWriter.SHA1DigestString());
+			Assert.AreEqual("md5-rL0Y20zC+Fzt72VPzMSk2A==", blobWriter.MD5DigestString());
 
 			// install it
 			blobWriter.Install();
@@ -520,7 +519,11 @@ namespace Couchbase.Lite
                 var attachmentDataRetrievedString = Runtime.GetStringForBytes(attachmentDataRetrieved);
                 var attachBodyString = Sharpen.Runtime.GetStringForBytes(attachBodyBytes);
 				Assert.AreEqual(attachBodyString, attachmentDataRetrievedString);
+                // Cleanup.
+                attachmentRetrieved.Dispose();
 			}
+            // Cleanup.
+            attachment.Dispose();
 		}
 	}
 }

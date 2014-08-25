@@ -639,7 +639,8 @@ namespace Couchbase.Lite
 			var rev = doc.CurrentRevision;
 			Assert.AreEqual(rev.Attachments.Count(), 0);
             Assert.AreEqual(rev.AttachmentNames.Count(), 0);
-            Assert.IsNull(rev.GetAttachment("index.html"));
+            var attach = rev.GetAttachment("index.html");
+            Assert.IsNull(attach);
 
 			var content = "This is a test attachment!";
             var body = new MemoryStream(Runtime.GetBytesForString(content).ToArray());
@@ -653,7 +654,7 @@ namespace Couchbase.Lite
 			Assert.AreEqual(rev3.Attachments.Count(), 1);
             Assert.AreEqual(rev3.AttachmentNames.Count(), 1);
 
-            var attach = rev3.GetAttachment("index.html");
+            attach = rev3.GetAttachment("index.html");
 			Assert.IsNotNull(attach);
 			Assert.AreEqual(doc, attach.Document);
 			Assert.AreEqual("index.html", attach.Name);
@@ -672,6 +673,7 @@ namespace Couchbase.Lite
 			var rev4 = newRev.Save();
 			Assert.IsNotNull(rev4);
             Assert.AreEqual(0, rev4.AttachmentNames.Count());
+            attach.Dispose();
 		}
 
 		//CHANGE TRACKING

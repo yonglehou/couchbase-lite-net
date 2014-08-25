@@ -58,7 +58,7 @@ namespace Couchbase.Lite {
     /// <summary>
     /// A Couchbase Lite Document Attachment.
     /// </summary>
-    public partial class Attachment {
+    public partial class Attachment : IDisposable {
 
         #region Constants
 
@@ -241,13 +241,14 @@ namespace Couchbase.Lite {
         /// </exception>
         public IEnumerable<Byte> Content { 
             get {
-                var stream = ContentStream;
-
                 ContentStream.Reset();
 
-                MemoryStream ms = new MemoryStream();
+                var stream = ContentStream;
+                var ms = new MemoryStream();
                 stream.CopyTo(ms);
-                return ms.ToArray();
+                var bytes = ms.ToArray();
+                ms.Dispose();
+                return bytes;
             }
         }
 
@@ -267,7 +268,16 @@ namespace Couchbase.Lite {
         public IDictionary<String, Object> Metadata { get ; private set; }
 
         #endregion
-        
+
+
+        public void Dispose()
+        {
+            if (Body != null)
+            {
+                Body.Dispose();
+                Body = null;
+            }
+        }
     }
 
 }

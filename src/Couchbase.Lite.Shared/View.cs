@@ -254,7 +254,6 @@ namespace Couchbase.Lite {
                             // user-defined map() block
                             // that's called down below.
 
-                            var enclosingView = this;
                             var thisSequence = sequence;
                             var map = Map;
 
@@ -271,12 +270,12 @@ namespace Couchbase.Lite {
                                     Log.V(Database.Tag, String.Format("    emit({0}, {1})", keyJson, valueJson));
 
                                     var insertValues = new ContentValues();
-                                    insertValues.Put("view_id", enclosingView.Id);
+                                    insertValues.Put("view_id", Id);
                                     insertValues["sequence"] = thisSequence;
                                     insertValues["key"] = keyJson;
                                     insertValues["value"] = valueJson;
 
-                                    enclosingView.Database.StorageEngine.Insert("maps", null, insertValues);
+                                    Database.StorageEngine.Insert("maps", null, insertValues);
 
                                     //
                                     // According to the issue #81, it is possible that there will be another

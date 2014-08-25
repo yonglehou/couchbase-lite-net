@@ -130,8 +130,8 @@ namespace Couchbase.Lite
 				throw new RuntimeException("Unable to write to stream.", e);
 			}
 			length += dataVector.Length;
-			sha1Digest.Update(dataVector);
-			md5Digest.Update(dataVector);
+            sha1Digest.Update(dataVector);
+            md5Digest.Update(dataVector);
 		}
 
 		internal void Read(InputStream inputStream)
@@ -178,10 +178,9 @@ namespace Couchbase.Lite
 			{
 				Log.W(Database.Tag, "Exception closing output stream", e);
 			}
-			blobKey = new BlobKey(sha1Digest.Digest());
-			md5DigestResult = md5Digest.Digest();
-            sha1DigestResult = sha1Digest.Digest();
-		}
+            blobKey = new BlobKey(sha1Digest.Digest());
+            md5DigestResult = md5Digest.Digest();
+        }
 
 		/// <summary>Call this to cancel before finishing the data.</summary>
 		/// <remarks>Call this to cancel before finishing the data.</remarks>
@@ -226,9 +225,9 @@ namespace Couchbase.Lite
             return string.Format("md5-{0}", base64Md5Digest);
 		}
 
-		public virtual string SHA1DigestString()
-		{
-            string base64Sha1Digest = Convert.ToBase64String(sha1DigestResult);
+        public string SHA1DigestString()
+        {
+            var base64Sha1Digest = Convert.ToBase64String(blobKey.GetBytes());
             return string.Format("sha1-{0}", base64Sha1Digest);
 		}
 

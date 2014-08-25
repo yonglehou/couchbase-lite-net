@@ -79,9 +79,9 @@ namespace Sharpen
                 return new PortableMessageDigest(PCLCrypto.HashAlgorithm.Md5);
 #else
 			case "sha-1":
-                    return new MessageDigest<global::System.Security.Cryptography.SHA1Cng>();
+                    return new MessageDigest<global::System.Security.Cryptography.SHA1Managed>();
 			case "md5":
-                    return new MessageDigest<HMACMD5>();
+                    return new MessageDigest<MD5CryptoServiceProvider>();
 #endif
             }
 			throw new NotSupportedException (string.Format ("The requested algorithm \"{0}\" is not supported.", algorithm));

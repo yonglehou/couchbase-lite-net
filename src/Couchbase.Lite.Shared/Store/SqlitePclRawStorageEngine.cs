@@ -298,6 +298,7 @@ namespace Couchbase.Lite.Shared
 
             } catch (Exception ex) {
                 Log.E(Tag, "Error inserting into table " + table, ex);
+                db.close();
                 throw;
             } finally {
                 lock (dbLock) {
