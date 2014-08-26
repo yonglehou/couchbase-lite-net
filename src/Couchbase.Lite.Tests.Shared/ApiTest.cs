@@ -155,7 +155,7 @@ namespace Couchbase.Lite
 
             // create the docs that will cause the above change listener to decrement countdown latch
             var createTask = CreateDocumentsAsync(db, n: 50);
-            createTask.Wait(TimeSpan.FromSeconds(5));
+            Assert.IsTrue(createTask.Wait(TimeSpan.FromSeconds(5)));
             if (methodNameToCall.Equals("start"))
             {
                 // start the livequery running asynchronously
@@ -172,7 +172,7 @@ namespace Couchbase.Lite
             }
 
             // wait for the doneSignal to be finished
-            var success = doneSignal.Await(TimeSpan.FromSeconds(5));
+            var success = doneSignal.Await(TimeSpan.FromSeconds(10));
             Assert.IsTrue(success, "Done signal timed out live query never ran");
 
             // stop the livequery since we are done with it

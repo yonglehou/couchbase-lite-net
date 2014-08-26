@@ -134,3 +134,4 @@ src/lib/System.Net.Http.Formatting.dll
 src/lib/System.Net.Http.Formatting.dll.mdb
 
 Tools/sync_gateway
+*.exe
