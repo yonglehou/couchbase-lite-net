@@ -44,7 +44,6 @@ using Couchbase.Lite.Storage;
 using System.Threading;
 using SQLitePCL;
 using Couchbase.Lite.Util;
-//using System.Data;
 using System.Diagnostics;
 using System.Text;
 using System.Collections.Generic;
@@ -60,29 +59,35 @@ namespace Couchbase.Lite.Shared
         private const int SQLITE_OPEN_READWRITE = 0x00000002;
         private const int SQLITE_OPEN_CREATE = 0x00000004;
         private const int SQLITE_OPEN_FULLMUTEX = 0x00010000;
+        private const int SQLITE_OPEN_NOMUTEX = 0x00008000;
+        private const int SQLITE_OPEN_PRIVATECACHE = 0x00040000;
 
         private const String Tag = "SqlitePCLRawStorageEngine";
-        private sqlite3 db;
+        //[ThreadStatic]
+        private /*static*/ sqlite3 db;
         private Boolean shouldCommit;
+
+        string Path { get; set; }
 
         #region implemented abstract members of SQLiteStorageEngine
 
-        public bool Open (String path)
+        public bool Open(String path)
         {
             if (IsOpen)
                 return true;
-
+            Path = path;
             var errMessage = "Cannot open Sqlite Database at pth {0}".Fmt(path);
 
             var result = true;
-            try {
+            try
+            {
                 shouldCommit = false;
-                const int flags = SQLITE_OPEN_FILEPROTECTION_COMPLETEUNLESSOPEN | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX; // #define SQLITE_OPEN_FILEPROTECTION_COMPLETEUNLESSOPEN 0x00200000
+                const int flags = SQLITE_OPEN_FILEPROTECTION_COMPLETEUNLESSOPEN | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
 
-                var status = raw.sqlite3_open_v2(path, out db, flags, null);
+                var status = raw.sqlite3_open_v2(Path, out db, flags, null);
                 if (status != raw.SQLITE_OK)
                 {
-                    throw new SQLException(errMessage);
+                    throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
                 }
 #if __ANDROID__
 #else
@@ -95,8 +100,13 @@ namespace Couchbase.Lite.Shared
                 }
 #endif
 
-                RegisterCollationFunctions(db);
-            } catch (Exception ex) {
+                raw.sqlite3_create_collation(db, "JSON", null, CouchbaseSqliteJsonUnicodeCollationFunction.Compare);
+                raw.sqlite3_create_collation(db, "JSON_ASCII", null, CouchbaseSqliteJsonAsciiCollationFunction.Compare);
+                raw.sqlite3_create_collation(db, "JSON_RAW", null, CouchbaseSqliteJsonRawCollationFunction.Compare);
+                raw.sqlite3_create_collation(db, "REVID", null, CouchbaseSqliteRevIdCollationFunction.Compare);
+            }
+            catch (Exception ex)
+            {
                 Log.E(Tag, "Error opening the Sqlite connection using connection String: {0}".Fmt(path), ex);
                 result = false;
             }
@@ -108,18 +118,24 @@ namespace Couchbase.Lite.Shared
         {
             var commandText = "PRAGMA user_version;";
             sqlite3_stmt statement;
-            lock (dbLock) { statement = db.prepare (commandText); }
+            lock (dbLock) { statement = db.prepare(commandText); }
 
             var result = -1;
-            try {
+            try
+            {
                 var commandResult = raw.sqlite3_step(statement);
-                if (commandResult != raw.SQLITE_ERROR) {
+                if (commandResult != raw.SQLITE_ERROR)
+                {
                     Debug.Assert(commandResult == raw.SQLITE_ROW);
                     result = raw.sqlite3_column_int(statement, 0);
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e)
+            {
                 Log.E(Tag, "Error getting user version", e);
-            } finally {
+            }
+            finally
+            {
                 statement.Dispose();
             }
 
@@ -132,19 +148,24 @@ namespace Couchbase.Lite.Shared
             var commandText = "PRAGMA user_version = ?";
 
             sqlite3_stmt statement;
-            lock (dbLock) { statement = db.prepare (commandText); }
+            lock (dbLock) { statement = db.prepare(commandText); }
 
             if (raw.sqlite3_bind_int(statement, 1, version) == raw.SQLITE_ERROR)
-                throw new SQLException(errMessage);
+                throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
 
             int result;
-            try {
+            try
+            {
                 result = statement.step();
                 if (result != SQLiteResult.OK)
-                    throw new SQLException(errMessage);
-            } catch (Exception e) {
+                    throw new CouchbaseLiteException(errMessage, StatusCode.DbError);
+            }
+            catch (Exception e)
+            {
                 Log.E(Tag, "Error getting user version", e);
-            } finally {
+            }
+            finally
+            {
                 statement.Dispose();
             }
             return;
@@ -152,22 +173,29 @@ namespace Couchbase.Lite.Shared
 
         public bool IsOpen
         {
-            get { 
+            get
+            {
                 return db != null;
             }
         }
 
         int transactionCount = 0;
 
-        public void BeginTransaction ()
+        public void BeginTransaction()
         {
+            if (!IsOpen)
+            {
+                Open(Path);
+            }
             // NOTE.ZJG: Seems like we should really be using TO SAVEPOINT
             //           but this is how Android SqliteDatabase does it,
             //           so I'm matching that for now.
             var value = Interlocked.Increment(ref transactionCount);
 
-            if (value == 1){
-                lock (dbLock) {
+            if (value == 1)
+            {
+                lock (dbLock)
+                {
                     using (var statement = db.prepare("BEGIN TRANSACTION"))
                     {
                         statement.step_done();
@@ -176,7 +204,7 @@ namespace Couchbase.Lite.Shared
             }
         }
 
-        public void EndTransaction ()
+        public void EndTransaction()
         {
             if (db == null)
                 throw new InvalidOperationException("Database is not open.");
@@ -185,45 +213,57 @@ namespace Couchbase.Lite.Shared
             if (count > 0)
                 return;
 
-            if (db == null) {
+            if (db == null)
+            {
                 if (shouldCommit)
-                    throw new InvalidOperationException ("Transaction missing.");
+                    throw new InvalidOperationException("Transaction missing.");
                 return;
             }
-            lock (dbLock) {
-                if (shouldCommit) {
-                    using (var stmt = db.prepare("COMMIT")) {
+            lock (dbLock)
+            {
+                if (shouldCommit)
+                {
+                    using (var stmt = db.prepare("COMMIT"))
+                    {
                         stmt.step_done();
                     }
                     shouldCommit = false;
-                } else {
-                    using (var stmt = db.prepare("ROLLBACK")) {
+                }
+                else
+                {
+                    using (var stmt = db.prepare("ROLLBACK"))
+                    {
                         stmt.step_done();
                     }
                 }
             }
         }
 
-        public void SetTransactionSuccessful ()
+        public void SetTransactionSuccessful()
         {
             shouldCommit = true;
         }
 
-        public void ExecSQL (String sql, params Object[] paramArgs)
+        public void ExecSQL(String sql, params Object[] paramArgs)
         {
-            RegisterCollationFunctions(db);
             lock (dbLock)
             {
-                var command = BuildCommand (sql, paramArgs);
+                RegisterCollationFunctions(db);
+                var command = BuildCommand(sql, paramArgs);
 
-                try {
+                try
+                {
                     var result = command.step();
                     if (result == SQLiteResult.ERROR)
-                        throw new SQLException(raw.sqlite3_errmsg(db));
-                } catch (Exception e) {
+                        throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
+                }
+                catch (Exception e)
+                {
                     Log.E(Tag, "Error {0} executing sql '{1}'".Fmt(db.extended_errcode(), sql), e);
                     throw;
-                } finally {
+                }
+                finally
+                {
                     command.Dispose();
                 }
             }
@@ -231,83 +271,107 @@ namespace Couchbase.Lite.Shared
 
         public Cursor RawQuery(String sql, params Object[] paramArgs)
         {
+            if (!IsOpen)
+            {
+                Open(Path);
+            }
             RegisterCollationFunctions(db);
             Cursor cursor = null;
-            var command = BuildCommand (sql, paramArgs);
+            var command = BuildCommand(sql, paramArgs);
 
-            try {
+            try
+            {
                 Log.V(Tag, "RawQuery sql: {0}".Fmt(sql));
-                lock (dbLock) {
-                cursor = new Cursor(command, dbLock);
+                lock (dbLock)
+                {
+                    cursor = new Cursor(command, dbLock);
                 }
-            } catch (Exception e) {
-                if (command != null) {
-                    lock (dbLock){
+            }
+            catch (Exception e)
+            {
+                if (command != null)
+                {
+                    lock (dbLock)
+                    {
                         command.Dispose();
                     }
                 }
 
                 Log.E(Tag, "Error executing raw query '{0}'".Fmt(sql), e);
-                throw new SQLException(e);
-            } 
+                throw;
+            }
 
             return cursor;
         }
 
-        public long Insert (String table, String nullColumnHack, ContentValues values)
+        public long Insert(String table, String nullColumnHack, ContentValues values)
         {
             return InsertWithOnConflict(table, null, values, ConflictResolutionStrategy.None);
         }
 
-        public long InsertWithOnConflict (String table, String nullColumnHack, ContentValues initialValues, ConflictResolutionStrategy conflictResolutionStrategy)
+        public long InsertWithOnConflict(String table, String nullColumnHack, ContentValues initialValues, ConflictResolutionStrategy conflictResolutionStrategy)
         {
-            if (!String.IsNullOrWhiteSpace(nullColumnHack)) {
+            if (!String.IsNullOrWhiteSpace(nullColumnHack))
+            {
                 var e = new InvalidOperationException("{0} does not support the 'nullColumnHack'.".Fmt(Tag));
                 Log.E(Tag, "Unsupported use of nullColumnHack", e);
                 throw e;
             }
+
             RegisterCollationFunctions(db);
             var lastInsertedId = -1L;
             var command = GetInsertCommand(table, initialValues, conflictResolutionStrategy);
 
-            try {
+            try
+            {
                 int result;
-                lock (dbLock) {
-                    result = command.step ();
+                lock (dbLock)
+                {
+                    result = command.step();
                 }
                 if (result == SQLiteResult.ERROR)
-                    throw new SQLException(raw.sqlite3_errmsg(db));
+                    throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
 
                 int changes;
-                lock (dbLock) {
-                    changes = db.changes ();
-                }
-                if (changes > 0) 
+                lock (dbLock)
                 {
-                    lock (dbLock) {
+                    changes = db.changes();
+                }
+                if (changes > 0)
+                {
+                    lock (dbLock)
+                    {
                         lastInsertedId = db.last_insert_rowid();
                     }
                 }
 
-                if (lastInsertedId == -1L) {
+                if (lastInsertedId == -1L)
+                {
                     Log.E(Tag, "Error inserting " + initialValues + " using " + command);
-                    throw new SQLException("Error inserting " + initialValues + " using " + command);
-                } else {
+                    throw new CouchbaseLiteException("Error inserting " + initialValues + " using " + command, StatusCode.DbError);
+                }
+                else
+                {
                     Log.V(Tag, "Inserting row " + lastInsertedId + " from " + initialValues + " using " + command);
                 }
 
-            } catch (Exception ex) {
+            }
+            catch (Exception ex)
+            {
                 Log.E(Tag, "Error inserting into table " + table, ex);
-                db.close();
                 throw;
-            } finally {
-                lock (dbLock) {
+            }
+            finally
+            {
+                lock (dbLock)
+                {
                     command.Dispose();
                 }
             }
 
             return lastInsertedId;
         }
+
         [Conditional("MSFT")]
         internal static void RegisterCollationFunctions(sqlite3 db)
         {
@@ -321,68 +385,79 @@ namespace Couchbase.Lite.Shared
 
         }
 
-        public int Update (String table, ContentValues values, String whereClause, params String[] whereArgs)
+        public int Update(String table, ContentValues values, String whereClause, params String[] whereArgs)
         {
             Debug.Assert(!String.IsNullOrWhiteSpace(table));
             Debug.Assert(values != null);
 
-            RegisterCollationFunctions(db);
             var resultCount = 0;
-            lock (dbLock) {
+            lock (dbLock)
+            {
+                RegisterCollationFunctions(db);
                 var command = GetUpdateCommand(table, values, whereClause, whereArgs);
-                try {
+                try
+                {
                     var result = command.step();
                     if (result == SQLiteResult.ERROR)
-                        throw new SQLException(raw.sqlite3_errmsg(db));
-
-                    resultCount = db.changes();
-                    if (resultCount < 0) 
-                    {
-                        Log.E(Tag, "Error updating " + values + " using " + command);
-                        throw new SQLException("Failed to update any records.");
-                    }
-                } catch (Exception ex) {
-                    Log.E(Tag, "Error updating table " + table, ex);
-                    throw;
-                } finally {
-                    command.Dispose();
-                }
-            }
-            return resultCount;
-        }
-
-        public int Delete (String table, String whereClause, params String[] whereArgs)
-        {
-            Debug.Assert(!String.IsNullOrWhiteSpace(table));
-            RegisterCollationFunctions(db);
-
-            var resultCount = -1;
-            lock (dbLock) {
-                var command = GetDeleteCommand(table, whereClause, whereArgs);
-                try {
-                    var result = command.step();
-                    if (result == SQLiteResult.ERROR)
-                        throw new SQLException("Error deleting from table " + table);
+                        throw new CouchbaseLiteException(raw.sqlite3_errmsg(db), StatusCode.DbError);
 
                     resultCount = db.changes();
                     if (resultCount < 0)
                     {
-                        throw new SQLException("Failed to delete the records.");
+                        Log.E(Tag, "Error updating " + values + " using " + command);
+                        throw new CouchbaseLiteException("Failed to update any records.", StatusCode.DbError);
                     }
-
-                } catch (Exception ex) {
-                    Log.E(Tag, "Error {0} when deleting from table {1}".Fmt(db.extended_errcode(), table), ex);
+                }
+                catch (Exception ex)
+                {
+                    Log.E(Tag, "Error updating table " + table, ex);
                     throw;
-                } finally {
+                }
+                finally
+                {
                     command.Dispose();
                 }
             }
             return resultCount;
         }
 
-        public void Close ()
+        public int Delete(String table, String whereClause, params String[] whereArgs)
         {
-            db.close_v2();
+            Debug.Assert(!String.IsNullOrWhiteSpace(table));
+
+            var resultCount = -1;
+            lock (dbLock)
+            {
+                RegisterCollationFunctions(db);
+                var command = GetDeleteCommand(table, whereClause, whereArgs);
+                try
+                {
+                    var result = command.step();
+                    if (result == SQLiteResult.ERROR)
+                        throw new CouchbaseLiteException("Error deleting from table " + table, StatusCode.DbError);
+
+                    resultCount = db.changes();
+                    if (resultCount < 0)
+                    {
+                        throw new CouchbaseLiteException("Failed to delete the records.", StatusCode.DbError);
+                    }
+
+                }
+                catch (Exception ex)
+                {
+                    Log.E(Tag, "Error {0} when deleting from table {1}".Fmt(db.extended_errcode(), table), ex);
+                    throw;
+                }
+                finally
+                {
+                    command.Dispose();
+                }
+            }
+            return resultCount;
+        }
+
+        public void Close()
+        {
             db.Dispose();
             db = null;
         }
@@ -391,20 +466,28 @@ namespace Couchbase.Lite.Shared
 
         #region Non-public Members
         private object dbLock = new Object();
-        sqlite3_stmt BuildCommand (string sql, object[] paramArgs)
+        sqlite3_stmt BuildCommand(string sql, object[] paramArgs)
         {
             sqlite3_stmt command = null;
-            try {
-                //Log.D(Tag, "Build Command : " + sql + " with params " + paramArgs);
-                lock(dbLock) {
-                    command = paramArgs.Length > 0 
-                        ? db.prepare(sql, paramArgs) 
-                        : db.prepare(sql);
-//                    if (paramArgs != null && paramArgs.Length > 0) {
-//                        command.bind (paramArgs);
-//                    }
+            try
+            {
+                if (!IsOpen)
+                {
+                    Open(Path);
                 }
-            } catch (Exception e) {
+                //Log.D(Tag, "Build Command : " + sql + " with params " + paramArgs);
+                lock (dbLock)
+                {
+                    command = paramArgs.Length > 0
+                        ? db.prepare(sql, paramArgs)
+                        : db.prepare(sql);
+                    //                    if (paramArgs != null && paramArgs.Length > 0) {
+                    //                        command.bind (paramArgs);
+                    //                    }
+                }
+            }
+            catch (Exception e)
+            {
                 Log.E(Tag, "Error when build a sql " + sql + " with params " + paramArgs, e);
                 throw;
             }
@@ -419,8 +502,12 @@ namespace Couchbase.Lite.Shared
         /// <param name="values">Values.</param>
         /// <param name="whereClause">Where clause.</param>
         /// <param name="whereArgs">Where arguments.</param>
-        sqlite3_stmt GetUpdateCommand (string table, ContentValues values, string whereClause, string[] whereArgs)
+        sqlite3_stmt GetUpdateCommand(string table, ContentValues values, string whereClause, string[] whereArgs)
         {
+            if (!IsOpen)
+            {
+                Open(Path);
+            }
             var builder = new StringBuilder("UPDATE ");
 
             builder.Append(table);
@@ -428,30 +515,32 @@ namespace Couchbase.Lite.Shared
 
             // Append our content column names and create our SQL parameters.
             var valueSet = values.ValueSet();
-//            var valueSetLength = valueSet.Count();
-//
-//            var whereArgsLength = (whereArgs != null ? whereArgs.Length : 0);
+            //            var valueSetLength = valueSet.Count();
+            //
+            //            var whereArgsLength = (whereArgs != null ? whereArgs.Length : 0);
 
             var paramList = new List<object>();
 
             var index = 0;
-            foreach(var column in valueSet)
+            foreach (var column in valueSet)
             {
-                if (index++ > 0) {
+                if (index++ > 0)
+                {
                     builder.Append(",");
                 }
                 builder.AppendFormat("{0} = ?", column.Key);
                 paramList.Add(column.Value);
             }
 
-            if (!String.IsNullOrWhiteSpace(whereClause)) {
+            if (!String.IsNullOrWhiteSpace(whereClause))
+            {
                 builder.Append(" WHERE ");
                 builder.Append(whereClause);
             }
 
             if (whereArgs != null)
             {
-                foreach(var arg in whereArgs)
+                foreach (var arg in whereArgs)
                 {
                     paramList.Add(arg);
                 }
@@ -459,9 +548,10 @@ namespace Couchbase.Lite.Shared
 
             var sql = builder.ToString();
             sqlite3_stmt command;
-            lock (dbLock) { 
-                command = db.prepare (sql);
-                command.bind (paramList.ToArray<object> ());
+            lock (dbLock)
+            {
+                command = db.prepare(sql);
+                command.bind(paramList.ToArray<object>());
             }
 
             return command;
@@ -474,11 +564,16 @@ namespace Couchbase.Lite.Shared
         /// <param name="table">Table.</param>
         /// <param name="values">Values.</param>
         /// <param name="conflictResolutionStrategy">Conflict resolution strategy.</param>
-        sqlite3_stmt GetInsertCommand (String table, ContentValues values, ConflictResolutionStrategy conflictResolutionStrategy)
+        sqlite3_stmt GetInsertCommand(String table, ContentValues values, ConflictResolutionStrategy conflictResolutionStrategy)
         {
+            if (!IsOpen)
+            {
+                Open(Path);
+            }
             var builder = new StringBuilder("INSERT");
 
-            if (conflictResolutionStrategy != ConflictResolutionStrategy.None) {
+            if (conflictResolutionStrategy != ConflictResolutionStrategy.None)
+            {
                 builder.Append(" OR ");
                 builder.Append(conflictResolutionStrategy);
             }
@@ -494,14 +589,15 @@ namespace Couchbase.Lite.Shared
 
             var args = new object[valueSet.Count];
 
-            foreach(var column in valueSet)
+            foreach (var column in valueSet)
             {
-                if (index > 0) {
+                if (index > 0)
+                {
                     builder.Append(",");
                     valueBuilder.Append(",");
                 }
 
-                builder.AppendFormat( "{0}", column.Key);
+                builder.AppendFormat("{0}", column.Key);
                 valueBuilder.Append("?");
 
                 args[index] = column.Value;
@@ -515,9 +611,10 @@ namespace Couchbase.Lite.Shared
 
             var sql = builder.ToString();
             sqlite3_stmt command;
-            lock (dbLock) {
-                command = db.prepare (sql);
-                command.bind (args);
+            lock (dbLock)
+            {
+                command = db.prepare(sql);
+                command.bind(args);
             }
 
             return command;
@@ -530,19 +627,25 @@ namespace Couchbase.Lite.Shared
         /// <param name="table">Table.</param>
         /// <param name="whereClause">Where clause.</param>
         /// <param name="whereArgs">Where arguments.</param>
-        sqlite3_stmt GetDeleteCommand (string table, string whereClause, string[] whereArgs)
+        sqlite3_stmt GetDeleteCommand(string table, string whereClause, string[] whereArgs)
         {
+            if (!IsOpen)
+            {
+                Open(Path);
+            }
             var builder = new StringBuilder("DELETE FROM ");
             builder.Append(table);
-            if (!String.IsNullOrWhiteSpace(whereClause)) {
+            if (!String.IsNullOrWhiteSpace(whereClause))
+            {
                 builder.Append(" WHERE ");
                 builder.Append(whereClause);
             }
 
             sqlite3_stmt command;
-            lock (dbLock) {
-                command = db.prepare (builder.ToString ());
-                command.bind (whereArgs);
+            lock (dbLock)
+            {
+                command = db.prepare(builder.ToString());
+                command.bind(whereArgs);
             }
 
             return command;
@@ -552,13 +655,11 @@ namespace Couchbase.Lite.Shared
 
         #region IDisposable implementation
 
-        public void Dispose ()
+        public void Dispose()
         {
-            if (db != null)
-                Close();
+            throw new NotImplementedException();
         }
 
         #endregion
     }
 }
-
