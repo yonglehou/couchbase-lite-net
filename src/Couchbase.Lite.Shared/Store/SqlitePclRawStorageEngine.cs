@@ -318,15 +318,18 @@ namespace Couchbase.Lite.Shared
                 throw e;
             }
 
-            RegisterCollationFunctions(db);
-            var lastInsertedId = -1L;
-            var command = GetInsertCommand(table, initialValues, conflictResolutionStrategy);
+            int result;
+            long lastInsertedId;
+            sqlite3_stmt command = null;
 
             try
             {
-                int result;
                 lock (dbLock)
                 {
+                    //RegisterCollationFunctions(db);
+                    lastInsertedId = -1L;
+                    command = GetInsertCommand(table, initialValues, conflictResolutionStrategy);
+
                     result = command.step();
                 }
                 if (result == SQLiteResult.ERROR)
@@ -373,16 +376,18 @@ namespace Couchbase.Lite.Shared
         }
 
         [Conditional("MSFT")]
-        internal static void RegisterCollationFunctions(sqlite3 db)
+        internal void RegisterCollationFunctions(sqlite3 db)
         {
-            var c1 = raw.sqlite3_create_collation(db, "JSON", null, CouchbaseSqliteJsonUnicodeCollationFunction.Compare);
+            lock (dbLock)
+            {
+                var c1 = raw.sqlite3_create_collation(db, "JSON", null, CouchbaseSqliteJsonUnicodeCollationFunction.Compare);
 
-            var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, CouchbaseSqliteJsonAsciiCollationFunction.Compare);
+                var c2 = raw.sqlite3_create_collation(db, "JSON_ASCII", null, CouchbaseSqliteJsonAsciiCollationFunction.Compare);
 
-            var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, CouchbaseSqliteJsonRawCollationFunction.Compare);
+                var c3 = raw.sqlite3_create_collation(db, "JSON_RAW", null, CouchbaseSqliteJsonRawCollationFunction.Compare);
 
-            var c4 = raw.sqlite3_create_collation(db, "REVID", null, CouchbaseSqliteRevIdCollationFunction.Compare);
-
+                var c4 = raw.sqlite3_create_collation(db, "REVID", null, CouchbaseSqliteRevIdCollationFunction.Compare);
+            }
         }
 
         public int Update(String table, ContentValues values, String whereClause, params String[] whereArgs)
@@ -611,11 +616,11 @@ namespace Couchbase.Lite.Shared
 
             var sql = builder.ToString();
             sqlite3_stmt command;
-            lock (dbLock)
-            {
+            //lock (dbLock)
+            //{
                 command = db.prepare(sql);
                 command.bind(args);
-            }
+            //}
 
             return command;
         }
