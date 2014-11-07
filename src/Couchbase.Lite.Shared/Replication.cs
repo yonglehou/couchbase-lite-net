@@ -947,7 +947,7 @@ namespace Couchbase.Lite
                         }
                         HttpResponseMessage result = null;
                         Exception error = null;
-                        if (!response.IsFaulted)
+                        if (!response.IsFaulted && !response.IsCanceled)
                         {
                             result = response.Result;
                             UpdateServerType(result);
