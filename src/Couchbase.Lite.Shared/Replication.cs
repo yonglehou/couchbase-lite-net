@@ -952,7 +952,7 @@ namespace Couchbase.Lite
                             result = response.Result;
                             UpdateServerType(result);
                         }
-                        else
+                        else if (response.IsFaulted)
                         {
                             error = response.Exception.InnerException;
                             Log.E(Tag, "Http Message failed to send: {0}", message);
@@ -960,6 +960,8 @@ namespace Couchbase.Lite
                             if (message.Content != null) {
                                 Log.E(Tag, "\tFailed content: {0}", message.Content.ReadAsStringAsync().Result);
                             }
+                        } else {
+                            Log.W(Tag, "Http message send was cancelled. Message details: {0}".Fmt(message));
                         }
 
                         if (completionHandler != null)
