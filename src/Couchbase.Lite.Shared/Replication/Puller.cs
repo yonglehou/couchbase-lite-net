@@ -74,8 +74,6 @@ namespace Couchbase.Lite.Replicator
 
         internal bool canBulkGet;
 
-        internal bool caughtUp;
-
         internal Batcher<RevisionInternal> downloadsToInsert;
 
         internal IList<RevisionInternal> revsToPull;
@@ -541,6 +539,14 @@ namespace Couchbase.Lite.Replicator
                         LastError = args.Error;
                         RevisionFailed();
                         SafeAddToCompletedChangesCount(remainingRevs.Count);
+                        for(int i = 0; i < remainingRevs.Count; i++)
+                        {
+                            var rev = remainingRevs[i];
+                            if(ShouldRetryDownload(rev.GetDocId())) 
+                            {
+                                bulkRevsToPull.Add(remainingRevs[i]);
+                            }
+                        }
                     }
 
                     Log.V(Tag, "PullBulkRevisions.Completion event handler calling AsyncTaskFinished()");
@@ -564,6 +570,35 @@ namespace Couchbase.Lite.Replicator
             dl.Authenticator = Authenticator;
             WorkExecutor.StartNew(dl.Run, CancellationTokenSource.Token, TaskCreationOptions.LongRunning, WorkExecutor.Scheduler);
 //            dl.Run();
+        }
+
+        private bool ShouldRetryDownload(string docId)
+        {
+            var localDoc = LocalDatabase.GetExistingLocalDocument(docId);
+            if (localDoc == null)
+            {
+                LocalDatabase.PutLocalDocument(docId, new Dictionary<string, object>
+                {
+                    {"retryCount", 1}
+                });
+                return true;
+            }
+
+            var retryCount = (long)localDoc["retryCount"];
+            if (retryCount >= ManagerOptions.Default.MaxRetries)
+            {
+                PruneFailedDownload(docId);
+                return false;
+            }
+
+            localDoc["retryCount"] = (long)localDoc["retryCount"] + 1;
+            LocalDatabase.PutLocalDocument(docId, localDoc);
+            return true;
+        }
+
+        private void PruneFailedDownload(string docId)
+        {
+            LocalDatabase.DeleteLocalDocument(docId);
         }
 
         // This invokes the tranformation block if one is installed and queues the resulting Revision
