@@ -49,6 +49,7 @@ using System.Security.Cryptography.X509Certificates;
 using Couchbase.Lite.Replicator;
 using Couchbase.Lite.Support;
 using Couchbase.Lite.Util;
+using System.Net;
 
 #if NET_3_5
 using System.Net.Couchbase;
@@ -135,8 +136,13 @@ namespace Couchbase.Lite.Support
             var handler = new HttpClientHandler {
                 CookieContainer = cookieStore,
                 UseDefaultCredentials = true,
-                UseCookies = true,
+                UseCookies = true
             };
+
+            if (handler.SupportsAutomaticDecompression)
+            {
+                handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            }
 
             var authHandler = new DefaultAuthHandler (handler, cookieStore);
 
